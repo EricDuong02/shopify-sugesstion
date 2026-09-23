@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: recommender-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-recommender}
+      POSTGRES_USER: ${DB_USERNAME:-recommender}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-recommender}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-recommender} -d ${DB_DATABASE:-recommender}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:8.12
+    container_name: recommender-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@recommender.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: recommender-ngrok
+    restart: unless-stopped
+    profiles: ["ngrok"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      bash -lc "if [ -n \"$NGROK_AUTHTOKEN\" ]; then if [ -n \"$NGROK_DOMAIN\" ]; then exec ngrok http --domain=\"$NGROK_DOMAIN\" --authtoken=\"$NGROK_AUTHTOKEN\" http://host.docker.internal:8081; else exec ngrok http --authtoken=\"$NGROK_AUTHTOKEN\" http://host.docker.internal:8081; fi; else exec ngrok http http://host.docker.internal:8081; fi"
+    ports:
+      - "4040:4040"
+
+volumes:
+  postgres_data:

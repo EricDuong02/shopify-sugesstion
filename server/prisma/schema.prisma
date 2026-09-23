@@ -1,0 +1,111 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "fullTextIndex"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL") 
+}
+
+model Shop {
+  id    String  @id @default(cuid())
+  name  String  @unique
+  token String?
+}
+
+model AppSession {
+  id      String @id
+  shop    String
+  payload Json
+}
+
+model OfferProduct {
+  id              Int              @id @default(autoincrement())
+  name            String
+  placeId         Int
+  productGroups   ProductGroups[]
+  triggerProduct  TriggerProduct?
+  fallBackProduct FallBackProduct?
+  listProduct     ListProduct[]
+}
+
+enum Status {
+  DRAFT
+  ACTIVE
+}
+
+model ListProduct {
+  id             Int           @id @default(autoincrement())
+  idProduct      String
+  url            String
+  avatarSource   String
+  name           String
+  handle         String
+  status         Status
+  price          Float
+  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime      @default(now())
+  OfferProduct   OfferProduct? @relation(fields: [offerProductId], references: [id])
+  offerProductId Int?
+
+  @@unique([idProduct, offerProductId])
+}
+
+model TriggerProduct {
+  id             Int             @id @default(autoincrement())
+  pageIds        Int[]
+  productGroups  ProductGroups[]
+  scheduleOn     Boolean
+  offerProduct   OfferProduct    @relation(fields: [offerProductId], references: [id])
+  offerProductId Int             @unique
+  updatedAt      DateTime        @updatedAt
+  createdAt      DateTime        @default(now())
+}
+
+model FallBackProduct {
+  id             Int             @id @default(autoincrement())
+  productGroups  ProductGroups[]
+  offerProduct   OfferProduct    @relation(fields: [offerProductId], references: [id])
+  offerProductId Int             @unique
+  updatedAt      DateTime        @updatedAt
+  createdAt      DateTime        @default(now())
+}
+
+model ProductGroups {
+  id                Int              @id @default(autoincrement())
+  typeId            String[]
+  rules             Rules[]
+  ids               String[]
+  OfferProduct      OfferProduct?    @relation(fields: [offerProductId], references: [id])
+  offerProductId    Int?
+  TriggerProduct    TriggerProduct?  @relation(fields: [triggerProductId], references: [id])
+  triggerProductId  Int?
+  FallBackProduct   FallBackProduct? @relation(fields: [fallBackProductId], references: [id])
+  fallBackProductId Int?
+  updatedAt         DateTime         @updatedAt
+  createdAt         DateTime         @default(now())
+}
+
+model Rules {
+  id              Int            @id @default(autoincrement())
+  column          Int
+  relation        Int
+  value           String[]
+  ProductGroups   ProductGroups? @relation(fields: [productGroupsId], references: [id])
+  productGroupsId Int?
+  updatedAt       DateTime       @updatedAt
+  createdAt       DateTime       @default(now())
+}
+
+model Tokens {
+  id        Int      @id @default(autoincrement())
+  name      String?
+  token     String   @unique
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}

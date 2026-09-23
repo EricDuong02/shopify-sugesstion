@@ -1,0 +1,40 @@
+x-logging:
+    logging: &logging
+        options:
+            max-size: "10m"
+            max-file: "3"
+x-restart:
+    restart: &restart unless-stopped
+
+services:
+    db:
+        image: postgres:16
+        environment:
+            POSTGRES_DB: ${DB_DATABASE}
+            POSTGRES_PASSWORD: ${DB_PASSWORD}
+            POSTGRES_USER: ${DB_USERNAME}
+        networks:
+            internal:
+            database:
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+        restart: *restart
+        logging: *logging
+    pgadmin:
+        image: dpage/pgadmin4
+        environment:
+            PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+            PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+            PGADMIN_CONFIG_SERVER_MODE: 'True'
+        volumes:
+            - pgadmin_data:/var/lib/pgadmin
+        ports:
+            - "${PGADMIN_PORT:-5050}:80"
+        networks:
+            internal:
+        restart: *restart
+        logging: *logging
+volumes:
+    ? db_data
+    ? postgres_data
+    ? pgadmin_data
