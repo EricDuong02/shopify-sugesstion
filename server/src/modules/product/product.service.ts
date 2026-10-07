@@ -1,9 +1,9 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Optional } from '@nestjs/common'
 import { ShopifyService } from '@/shared/services/shopify.service'
 
 @Injectable()
 export class ProductService {
-  constructor(private readonly shopify: ShopifyService) {}
+  constructor(@Optional() private readonly shopify?: ShopifyService) {}
 
   fetchProducts(session: any) {
     return this.shopify.api.rest.Product.all({
@@ -26,6 +26,6 @@ export class ProductService {
         }`,
     })
 
-    return products.body.data
+    return products.body
   }
 }

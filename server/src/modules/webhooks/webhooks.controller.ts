@@ -1,49 +1,61 @@
-import { Controller, Post, Req, Res } from '@nestjs/common'
+import { Controller, Optional, Post, Req, Res } from '@nestjs/common'
 import { Request } from 'express'
+import { PrismaClient } from '@prisma/client'
 import { ShopifyService } from '@/shared/services/shopify.service'
 
-/**
- * Make sure this path is what you provide in server/src/lib/shopify-app.ts
- * POST api/webhoooks
- * You can test webhooks by using shopify cli. Try running this after changing url
- * yarn shopify webhook trigger --topic app/uninstalled --address=https://like-initiative-performance-calvin.trycloudflare.com/api/webhooks
- * To find the cloudflare url(shopify cli doesn't show this anymore), inspect your app iframe and look for the url in the src attribute
- */
+const prisma = new PrismaClient()
 
+/**
+ * POST /api/webhooks
+ *
+ * Webhooks are handled directly in NestJS (no handlers are registered in
+ * server/src/lib/shopify-app.ts), so we validate the HMAC here and dispatch
+ * on the topic ourselves. We intentionally do NOT call
+ * api.webhooks.process(), because it throws
+ * "No HTTP webhooks registered for topic ..." when no handlers exist
+ * in the shopify-api webhook registry.
+ *
+ * Test with:
+ * yarn shopify webhook trigger --topic app/uninstalled --address /api/webhooks
+ */
 @Controller('webhooks')
 export class WebhooksController {
-  constructor(private readonly shopify: ShopifyService) {}
+  constructor(@Optional() private readonly shopify?: ShopifyService) {}
 
   @Post()
   async webhooks(@Res() res, @Req() req: Request) {
     try {
-      const data = await this.shopify.api.webhooks.validate({
+      // validate() checks the HMAC signature. On success it returns
+      // { valid: true, topic, domain, ... }, otherwise { valid: false, reason }
+      const data: any = await this.shopify.api.webhooks.validate({
         rawBody: req.body,
         rawRequest: req,
         rawResponse: res,
       })
 
-      console.log('Webhooks validates data ', data)
+      if (!data.valid) {
+        console.log(`Invalid webhook: ${data.reason ?? 'unknown reason'}`)
+        if (!res.headersSent) res.status(401).send('Invalid webhook')
+        return
+      }
 
-      // The shape of this data is not very typescript friendly
-      // {
-      //   valid: true,
-      //   apiVersion: "2023-10",
-      //   domain: "shop.myshopify.com",
-      //   hmac: "WFOccQ1OZlOQXBk3ub//KHtrmm7pVGc5H32GQNiw0XM=",
-      //   topic: "APP_UNINSTALLED",
-      //   webhookId: "462e63cd-0402-4e89-bdbd-f7331d1c4f81",
-      // };
-      // or
-      //  { valid: false, reason: 'missing_body' }
+      console.log(`Webhook validated: topic=${data.topic} shop=${data.domain}`)
 
-      await this.shopify.api.webhooks.process({
-        rawBody: req.body,
-        rawRequest: req,
-        rawResponse: res,
-      })
+      switch (data.topic) {
+        case 'APP_UNINSTALLED':
+          // Shop uninstalled the app: drop its sessions so a reinstall starts clean
+          await prisma.appSession.deleteMany({ where: { shop: data.domain } })
+          console.log(`Deleted sessions for uninstalled shop ${data.domain}`)
+          break
+        case 'SCOPES_UPDATE':
+          console.log(`Scopes updated for shop ${data.domain}`)
+          break
+        default:
+          console.log(`Unhandled webhook topic: ${data.topic}`)
+      }
 
-      console.log(`Webhook processed, returned status code 200`)
+      if (!res.headersSent) res.status(200).send()
+      console.log('Webhook processed, returned status code 200')
     } catch (e) {
       console.log(`Failed to process webhook: ${e.message}`)
       if (!res.headersSent) {

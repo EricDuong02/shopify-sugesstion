@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Optional } from '@nestjs/common'
 import '@shopify/shopify-api/adapters/node'
 import { GraphqlClient } from '@shopify/shopify-api'
 import { RestClient } from '@shopify/shopify-api/dist/ts/lib/clients/admin/rest/client'
@@ -10,7 +10,7 @@ import { PrismaService } from './prisma.service'
 export class ShopifyService {
   shopifyApp: typeof shopify
 
-  constructor(public readonly prisma: PrismaService) {
+  constructor(@Optional() public readonly prisma?: PrismaService) {
     this.shopifyApp = shopify
   }
 

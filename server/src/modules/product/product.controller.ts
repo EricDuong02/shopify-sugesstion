@@ -15,7 +15,9 @@ export class ProductController {
 
   @Get('gql')
   async fetchProductsGQL(@ShopClient('gql') gqlClient) {
-    const products = await this.productService.fetchProductsGQL(gqlClient)
-    return products.products.edges || []
+    const result = await this.productService.fetchProductsGQL(gqlClient)
+    const productData = result?.data ?? result ?? {}
+
+    return productData?.products?.edges || []
   }
 }

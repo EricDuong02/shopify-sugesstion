@@ -3,12 +3,13 @@ import { ApiVersion, LogSeverity } from '@shopify/shopify-api'
 import { shopifyApp } from '@shopify/shopify-app-express'
 import { STSessionStorage } from './st-sessions'
 
+const host = process.env.HOST ?? 'https://example.com'
 const apiConfig = {
-  apiKey: process.env.SHOPIFY_API_KEY,
-  apiSecretKey: process.env.SHOPIFY_API_SECRET,
-  scopes: process.env.SCOPES.split(','),
-  hostName: process.env.HOST.replace(/https?:\/\//, ''),
-  hostScheme: process.env.HOST.split('://')[0] as 'https',
+  apiKey: process.env.SHOPIFY_API_KEY ?? 'test-api-key',
+  apiSecretKey: process.env.SHOPIFY_API_SECRET ?? 'test-api-secret',
+  scopes: (process.env.SCOPES ?? 'read_products').split(','),
+  hostName: host.replace(/https?:\/\//, ''),
+  hostScheme: host.split('://')[0] as 'https',
   apiVersion: ApiVersion.April24,
   isEmbeddedApp: true,
   logger: {

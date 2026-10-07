@@ -1,197 +1,160 @@
-# Project deployment guide for Docker + Shopify app dev
+# Running the project in the dev environment (Linux)
 
-This guide helps you prepare a local or live-server environment so the project runs reliably with PostgreSQL, pgAdmin, ngrok, and the Shopify CLI.
+The project is a Shopify app using a yarn workspace:
 
-## 1. Prerequisites
+- server/: NestJS + Prisma + PostgreSQL
+- client/: React + Vite + Polaris
 
-Your machine or server should have:
+The dev command (Shopify CLI) starts the server and client at the same time, creates a tunnel, and automatically updates the app URLs. Docker is only used for PostgreSQL (and pgAdmin when needed). Do not run the Shopify CLI inside a container, because the CLI needs to open a browser on the host machine.
 
-- Docker
-- Docker Compose
+Note: this repo keeps several Shopify app configs. Development uses shopify.app.product-recommender.toml (app "product recommender"). The default shopify.app.toml points to the old app "starter-new-geon", which the current account cannot access, so every shopify command below must pass --config product-recommender.
+
+## 1. Requirements
+
+- Node.js 20
+- Yarn 1 (the yarn -v command returns 1.x)
+- Docker and Docker Compose
 - Git
-- Node.js 20+
-- Yarn 1
+- A Shopify Partner account in the organization that owns the app (see client_id in shopify.app.product-recommender.toml)
 
-## 2. Clone the project
-
-```bash
-git clone <repo-url>
-cd product-recommender
-```
-
-## 3. Configure environment variables
-
-The [.env.docker](.env.docker) file is already created. You need to fill in the required values:
-
-```env
-DB_DATABASE=recommender
-DB_USERNAME=recommender
-DB_PASSWORD=recommender
-
-PGADMIN_DEFAULT_EMAIL=admin@recommender.local
-PGADMIN_DEFAULT_PASSWORD=admin
-
-DATABASE_URL=postgresql://recommender:recommender@postgres:5432/recommender?schema=public
-SHADOW_DATABASE_URL=postgresql://recommender:recommender@postgres:5432/recommender_shadow?schema=public
-
-SHOPIFY_API_KEY=
-SHOPIFY_API_SECRET=
-SHOPIFY_APP_URL=http://localhost:8081
-PORT=8081
-
-NGROK_AUTHTOKEN=
-NGROK_DOMAIN=
-```
-
-### Important notes:
-- If you use ngrok, get your token from: https://dashboard.ngrok.com/get-started/your-authtoken
-- Paste it into `NGROK_AUTHTOKEN`
-- If you use a custom ngrok domain, fill in `NGROK_DOMAIN`
-
-## 4. Start the database stack only
+Quick check:
 
 ```bash
-docker compose up -d
+node -v
+yarn -v
+docker compose version
 ```
 
-After startup, the services will be available at:
+## 2. Starting PostgreSQL
 
-- PostgreSQL: localhost:5432
-- pgAdmin: http://localhost:5050
-- ngrok dashboard (only when enabled): http://localhost:4040
-
-## 5. Run the project on the host machine
-
-Do not run Shopify CLI inside the Docker container. The container is meant for PostgreSQL and admin tooling only.
-
-From the project root on your host machine:
+Run from the project root:
 
 ```bash
-cd /home/mit/Documents/all-in-b-company/aaa/product-recommender
+docker compose up -d postgres
+docker compose ps
+```
+
+Use docker compose ps to check that postgres is healthy before moving on to the next step.
+
+Note: docker-compose.yml mounts ./docker/postgres/init.sql. If this file is missing from the repo, Docker will mistakenly create a directory instead and Postgres will fail at startup. Check with ls docker/postgres/; if it is missing, create an empty file:
+
+```bash
+mkdir -p docker/postgres && touch docker/postgres/init.sql
+```
+
+Prisma migrate dev needs the recommender_shadow database. Prisma usually creates it automatically; if it reports an error, create it manually:
+
+```bash
+docker exec -it recommender-postgres psql -U recommender -d postgres -c "CREATE DATABASE recommender_shadow;"
+```
+
+After running:
+
+- PostgreSQL: localhost:5432 (user/password/db: recommender)
+- pgAdmin: http://localhost:5050 (only when running docker compose up -d instead of just postgres)
+
+## 3. Creating the environment file
+
+```bash
+cp server/.env.example server/.env
+```
+
+Open server/.env and fill in GA4_PROPERTY_ID (a placeholder is fine for dev). Two important points:
+
+- The database host is localhost because the app runs on the host machine. The hostnames postgres or db are only correct when the app runs inside the Docker network.
+- Do not declare SHOPIFY_API_KEY, SHOPIFY_API_SECRET, SCOPES, HOST, BACKEND_PORT, FRONTEND_PORT. The Shopify CLI injects these variables when the dev server runs.
+- The .env file is ignored by git (see .gitignore); do not commit it.
+
+## 4. Installing dependencies and migrating the database
+
+```bash
 yarn install
-yarn shopify auth login
+yarn migrate:dev
 ```
 
-If the app is not under the correct Partner organization, switch to the Shopify organization that owns the app.
-
-## 6. Run the app in development mode
-
-```bash
-yarn shopify app dev
-```
-
-This should be run on the host machine because the CLI opens a browser and needs access to the local operating system. A Docker container cannot reliably open `xdg-open`.
-
-If you want the app to be public via ngrok, start the tunnel separately:
-
-```bash
-docker compose --profile ngrok up -d
-```
-
-Then make sure:
-
-- `NGROK_AUTHTOKEN` is set
-- the correct Shopify app config is being used
-- `automatically_update_urls_on_dev = true` is enabled in the app config file
-
-Example:
-
-```toml
-[build]
-automatically_update_urls_on_dev = true
-```
-
-When `shopify app dev` runs, Shopify CLI will update callback and redirect URLs to match the active tunnel if permissions allow.
-
-## 8. Prisma database setup
-
-### Generate Prisma client and initialize the schema
-
-```bash
-cd /workspace/server
-npx prisma generate
-npx prisma migrate dev --name init
-```
+The yarn migrate:dev command is equivalent to yarn workspace server prisma migrate dev: it creates the migration and generates the Prisma Client (Prisma is pinned at 5.17.0 in server/package.json).
 
 If you only want to sync the schema without creating a new migration:
 
 ```bash
-npx prisma db push
+yarn workspace server prisma db push
 ```
 
-## 9. Stop the stack
-
-```bash
-docker compose down
-```
-
-If you want to remove all data volumes as well:
-
-```bash
-docker compose down -v
-```
-
-## 10. Suggestions for production / live server setup
-
-For live deployment, you should:
-
-- avoid hardcoding development URLs in `.env`
-- use environment variables specific to production
-- store `SHOPIFY_API_KEY` and `SHOPIFY_API_SECRET` in a secrets manager
-- keep `shopify.app.*.toml` only for Shopify app metadata
-- run the app on a server with a stable domain or reverse proxy
-
-## 11. Important Shopify CLI configuration
-
-The app config should look like this:
-
-```toml
-client_id = "..."
-name = "product-recommender"
-application_url = "https://your-public-url"
-embedded = true
-
-[build]
-automatically_update_urls_on_dev = true
-```
-
-> With ngrok, the URL changes as the tunnel changes. Therefore, you should not hardcode the dev URL in `.env` when using `shopify app dev`.
-
-## 12. Common issues and fixes
-
-### Error: "You are not a member of the requested organization"
-
-Cause: you are logged in to Shopify with an account that does not belong to the organization that owns the app.
-
-Fix:
+## 5. Logging in to Shopify
 
 ```bash
 yarn shopify auth login
 ```
 
-Then switch to the correct organization that owns the app.
+Select the correct organization that owns the app. If you select the wrong one, you will get the error "You are not a member of the requested organization".
 
-### Error: ngrok is not running
-
-Check `NGROK_AUTHTOKEN` in [.env.docker](.env.docker).
-
-### Error: Prisma cannot connect to the database
-
-Check:
+## 6. Running in dev mode
 
 ```bash
-docker compose ps
+yarn shopify app dev --config product-recommender --store product-recommender-dev.myshopify.com
 ```
 
-Then verify `DATABASE_URL` in [.env.docker](.env.docker).
+The --config flag selects shopify.app.product-recommender.toml. Without it, the CLI reads the default shopify.app.toml (app "starter-new-geon") and fails with 403 "You are not a member of the requested organization". The --store flag selects the dev store; the config file has no dev_store_url, so omitting --store makes the CLI ask for a store interactively.
 
----
+The Shopify CLI will:
 
-If needed, you can use these commands for quick checks:
+- Create a tunnel and automatically update the URLs in shopify.app.product-recommender.toml, thanks to automatically_update_urls_on_dev = true.
+- Start the server first, then the client, following the order web_directories = [ "server", "client" ]. This order is required for the Vite proxy to the server to work.
+- Print the install link for the dev store (product-recommender-dev.myshopify.com). Open that link to install and use the app.
+
+The API Swagger docs are available at /tools/swagger on the app URL.
+
+## 7. Stopping the stack
+
+Press Ctrl+C to stop the dev server, then:
 
 ```bash
-docker compose ps
-docker compose logs -f postgres
-docker compose logs -f ngrok
-docker compose logs -f workspace
+docker compose down
+docker compose down -v
 ```
+
+The docker compose down command keeps the database data; docker compose down -v also deletes the database data.
+
+## 8. Common errors
+
+### 403 "You are not a member of the requested organization"
+
+You are using the wrong app config or the wrong account. The default shopify.app.toml points to "starter-new-geon", which the current account cannot access. Always pass --config product-recommender to every shopify command, for example:
+
+```bash
+yarn shopify app dev --config product-recommender --store product-recommender-dev.myshopify.com
+yarn shopify webhook trigger --config product-recommender --topic app/uninstalled --api-version 2026-10 --address /api/webhooks
+```
+
+### Prisma reports "Can't reach database server"
+
+- Check the container with docker compose ps (is postgres healthy?).
+- Check DATABASE_URL in server/.env: the host must be localhost, not postgres or db.
+
+### Prisma reports a shadow database error
+
+Create the database manually as described in section 2.
+
+### Port 5432 is already in use
+
+Another PostgreSQL is running on the machine. Check with ss -ltnp | grep 5432, then stop it or change the port in docker-compose.yml.
+
+### shopify: command not found error
+
+You have not run yarn install in the project root. The Shopify CLI is in the root project's dependencies.
+
+### Old tunnel URL is not accessible
+
+Do not hardcode the dev URL in .env. Each time the dev server runs, the CLI updates it with a new URL.
+
+### Server stops because GA4_PROPERTY_ID is missing
+
+Set a value in server/.env. A placeholder is fine for dev.
+
+## 9. Suggestions for production deployment
+
+- Do not hardcode the dev URL in .env; use separate environment variables for production.
+- Store SHOPIFY_API_KEY and SHOPIFY_API_SECRET in a secrets manager.
+- Keep only the Shopify app metadata in shopify.app.*.toml.
+- Run the app on a server with a stable domain or a reverse proxy.
+- See the Dockerfile and nixpacks.toml for the build and run commands (for example: yarn build:prod in server).
