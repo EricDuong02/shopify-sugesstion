@@ -1,29 +1,21 @@
-import { Controller, Optional, Post, Req, Res } from '@nestjs/common'
-import { Request } from 'express'
+import { Controller, HttpCode, Optional, Post, Req, Res } from '@nestjs/common'
+import { Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { ShopifyService } from '@/shared/services/shopify.service'
+import { CatalogSyncService } from '../chat/services/catalog-sync.service'
 
 const prisma = new PrismaClient()
 
-/**
- * POST /api/webhooks
- *
- * Webhooks are handled directly in NestJS (no handlers are registered in
- * server/src/lib/shopify-app.ts), so we validate the HMAC here and dispatch
- * on the topic ourselves. We intentionally do NOT call
- * api.webhooks.process(), because it throws
- * "No HTTP webhooks registered for topic ..." when no handlers exist
- * in the shopify-api webhook registry.
- *
- * Test with:
- * yarn shopify webhook trigger --topic app/uninstalled --address /api/webhooks
- */
 @Controller('webhooks')
 export class WebhooksController {
-  constructor(@Optional() private readonly shopify?: ShopifyService) {}
+  constructor(
+    @Optional() private readonly shopify: ShopifyService,
+    @Optional() private readonly catalogSync: CatalogSyncService,
+  ) {}
 
   @Post()
-  async webhooks(@Res() res, @Req() req: Request) {
+  @HttpCode(200)
+  async handleWebhook(@Req() req: Request, @Res() res: Response): Promise<void> {
     try {
       // validate() checks the HMAC signature. On success it returns
       // { valid: true, topic, domain, ... }, otherwise { valid: false, reason }
@@ -34,8 +26,7 @@ export class WebhooksController {
       })
 
       if (!data.valid) {
-        console.log(`Invalid webhook: ${data.reason ?? 'unknown reason'}`)
-        if (!res.headersSent) res.status(401).send('Invalid webhook')
+        res.status(401).send('Invalid webhook signature')
         return
       }
 
@@ -50,17 +41,61 @@ export class WebhooksController {
         case 'SCOPES_UPDATE':
           console.log(`Scopes updated for shop ${data.domain}`)
           break
+        case 'PRODUCTS_CREATE':
+        case 'PRODUCTS_UPDATE':
+          await this.handleProductUpsert(data.domain, req.body)
+          break
+        case 'PRODUCTS_DELETE':
+          await this.handleProductDelete(data.domain, req.body)
+          break
         default:
           console.log(`Unhandled webhook topic: ${data.topic}`)
       }
 
-      if (!res.headersSent) res.status(200).send()
-      console.log('Webhook processed, returned status code 200')
-    } catch (e) {
-      console.log(`Failed to process webhook: ${e.message}`)
-      if (!res.headersSent) {
-        res.status(400).send(e.message)
-      }
+      res.status(200).send('OK')
+    } catch (error) {
+      console.error('[webhooks] error processing webhook:', error)
+      res.status(400).send('Webhook error')
     }
+  }
+
+  private async handleProductUpsert(domain: string, rawBody: any): Promise<void> {
+    const productId = extractProductIdFromBody(rawBody)
+    if (!domain || !productId) return
+    if (!this.catalogSync) {
+      console.warn('[webhooks] CatalogSyncService unavailable, skipping sync')
+      return
+    }
+    await this.catalogSync.enqueueProductSync(domain, productId)
+  }
+
+  private async handleProductDelete(domain: string, rawBody: any): Promise<void> {
+    const productId = extractProductIdFromBody(rawBody)
+    if (!domain || !productId) return
+    if (!this.catalogSync) {
+      console.warn('[webhooks] CatalogSyncService unavailable, skipping delete')
+      return
+    }
+    await this.catalogSync.deleteProduct(domain, productId)
+  }
+}
+
+/**
+ * The raw body is a Buffer here because HMAC validation needs the exact
+ * bytes Shopify signed, so parse it defensively instead of assuming an
+ * object.
+ */
+function extractProductIdFromBody(rawBody: any): string | null {
+  try {
+    const text =
+      typeof rawBody === 'string'
+        ? rawBody
+        : Buffer.isBuffer(rawBody)
+          ? rawBody.toString('utf8')
+          : JSON.stringify(rawBody)
+    const body = JSON.parse(text)
+    return body?.id != null ? String(body.id) : null
+  } catch {
+    return null
   }
 }

@@ -1,0 +1,9 @@
+{
+  "chat_widget": {
+    "title": "Chat with us",
+    "input_placeholder": "Type your message...",
+    "open_chat": "Open chat",
+    "close_chat": "Close chat",
+    "send_message": "Send message"
+  }
+}

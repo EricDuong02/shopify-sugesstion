@@ -1,0 +1,54 @@
+{% comment %}
+AI Chat Widget app embed: config via data attributes + assets.
+All behaviour lives in chat-widget.js.
+{% endcomment %}
+
+{{ 'chat-widget.css' | asset_url | stylesheet_tag }}
+
+<div
+  id="ai-chat-widget-root"
+  data-shop="{{ shop.permanent_domain }}"
+  data-api-base="{{ block.settings.api_base_url | strip }}"
+  data-position="{{ block.settings.position }}"
+  data-primary-color="{{ block.settings.primary_color }}"
+  data-greeting="{{ block.settings.greeting | escape }}"
+></div>
+
+<script src="{{ 'chat-widget.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "AI Chat Widget",
+  "target": "body",
+  "settings": [
+    {
+      "type": "text",
+      "id": "api_base_url",
+      "label": "App API base URL",
+      "info": "Your app URL with no trailing slash, e.g. https://my-app.fly.dev. In dev this is the tunnel URL shown by 'shopify app dev'."
+    },
+    {
+      "type": "select",
+      "id": "position",
+      "label": "Widget position",
+      "options": [
+        { "value": "bottom-right", "label": "Bottom right" },
+        { "value": "bottom-left", "label": "Bottom left" }
+      ],
+      "default": "bottom-right"
+    },
+    {
+      "type": "color",
+      "id": "primary_color",
+      "label": "Primary color",
+      "default": "#008060"
+    },
+    {
+      "type": "text",
+      "id": "greeting",
+      "label": "Greeting message",
+      "default": "Hi! How can I help you find the right product today?"
+    }
+  ]
+}
+{% endschema %}

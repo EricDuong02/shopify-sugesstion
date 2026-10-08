@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaClient } from '@prisma/client'
 import { RecommendDto } from '../dtos/recommends.dto'
 import { PageType } from '@/types/RecommendApi'
@@ -47,7 +47,26 @@ export class RecommenderApiService {
       },
     })
 
+    if (!dataCondition) {
+      throw new NotFoundException(
+        `OfferProduct with id ${query.id} not found`,
+      )
+    }
+
+    if (!dataCondition.triggerProduct) {
+      throw new NotFoundException(
+        `OfferProduct ${dataCondition.id} has no trigger product`,
+      )
+    }
+
     const productGroups = dataCondition.triggerProduct.productGroups[0]
+
+    if (!productGroups) {
+      throw new NotFoundException(
+        `Trigger product of OfferProduct ${dataCondition.id} has no product groups`,
+      )
+    }
+
     const typeId = productGroups.typeId
     const rules = productGroups.rules
 

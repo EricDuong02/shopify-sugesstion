@@ -9,6 +9,14 @@ const navigationLinks = [
     label: 'Generate token',
     destination: '/token',
   },
+  {
+    label: 'Chat monitoring',
+    destination: '/chat',
+  },
+  {
+    label: 'Chat config',
+    destination: '/chat-config',
+  },
 ]
 
 export default function CustomNavigationMenu() {

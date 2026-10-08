@@ -109,3 +109,64 @@ model Tokens {
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
 }
+
+model ChatShopConfig {
+  id                          Int      @id @default(autoincrement())
+  shopId                      String   @unique
+  enabled                     Boolean  @default(true)
+  llmProvider                 String   @default("openai")
+  llmModel                    String   @default("gpt-4o-mini")
+  llmApiKeyEnc                String?
+  systemPrompt                String?
+  topK                        Int      @default(5)
+  temperature                 Float    @default(0.3)
+  publicToken                 String   @unique
+  rateLimitPerMin             Int      @default(20)
+  fallbackMode                String   @default("free_first_paid_backup")
+  fallbackBudgetCapUsdPerDay  Float    @default(2.0)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+}
+
+model ProductEmbedding {
+  id              Int      @id @default(autoincrement())
+  shopId          String
+  shopifyProductId String
+  embedding       Unsupported("vector(768)")?
+  contentHash     String
+  productTitle    String?
+  productHandle   String?
+  productUrl      String?
+  productImageUrl String?
+  price           Float?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([shopId, shopifyProductId])
+}
+
+model ChatSession {
+  id        String   @id @default(cuid())
+  shopId    String
+  startedAt DateTime @default(now())
+  endedAt   DateTime?
+  messages  ChatMessage[]
+
+  @@index([shopId, startedAt])
+}
+
+model ChatMessage {
+  id             Int      @id @default(autoincrement())
+  sessionId      String
+  session        ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role           String
+  content        String
+  tokensIn       Int?
+  tokensOut      Int?
+  latencyMs      Int?
+  fallbackUsed   Boolean  @default(false)
+  fallbackReason String?
+  createdAt      DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+}

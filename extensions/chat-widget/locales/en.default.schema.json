@@ -1,0 +1,30 @@
+{
+  "blocks": {
+    "chat_embed": {
+      "name": "AI Chat Widget",
+      "settings": {
+        "api_base_url": {
+          "label": "App API base URL",
+          "info": "Your app URL with no trailing slash, e.g. https://my-app.fly.dev. In dev this is the tunnel URL shown by 'shopify app dev'."
+        },
+        "position": {
+          "label": "Widget position",
+          "options": {
+            "bottom-right": {
+              "label": "Bottom right"
+            },
+            "bottom-left": {
+              "label": "Bottom left"
+            }
+          }
+        },
+        "primary_color": {
+          "label": "Primary color"
+        },
+        "greeting": {
+          "label": "Greeting message"
+        }
+      }
+    }
+  }
+}

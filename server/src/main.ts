@@ -4,6 +4,11 @@ import * as express from 'express'
 import { Request, Response, NextFunction } from 'express'
 import * as serveStatic from 'serve-static'
 
+// This project does not enable esModuleInterop, so the CommonJS default
+// export has to be required rather than default-imported.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const cors = require('cors')
+
 import shopify from './lib/shopify-app.js'
 import bootstrap from './nest-main.js'
 import setupSwagger from './lib/setup-swagger.js'
@@ -44,6 +49,24 @@ const unless = function (paths: string[], middleware) {
 async function main() {
   const app = express()
 
+  // Answer CORS preflight at the raw Express level, before any Shopify
+  // middleware. The embedded admin iframe (origin admin.shopify.com) and
+  // the storefront widget (origin *.myshopify.com) both send non-simple
+  // requests, so the browser issues an OPTIONS probe first. With
+  // `origin: true` the cors package skips writing Access-Control-Allow-Origin
+  // whenever it decides the origin is not allowed, which produced a failed
+  // preflight; `origin: '*'` always writes the header.
+  // An OPTIONS request only receives headers and ends here. Real requests
+  // still pass through validateAuthenticatedSession and the route guards.
+  app.use(
+    cors({
+      origin: '*',
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      maxAge: 86400,
+    }),
+  )
+
   // Set up Shopify authentication and webhook handling
   app.get(shopify.config.auth.path, shopify.auth.begin())
   app.get(
@@ -62,13 +85,26 @@ async function main() {
   nestApp.use(
     '/api/*',
     unless(
-      ['/api/webhooks', '/api/v1/recommender-api'],
+      [
+        '/api/webhooks',
+        '/api/v1/recommender-api',
+        // Storefront chat widget: visitors are not Shopify-authenticated.
+        // Access is guarded by the per-shop public token inside ChatService.
+        '/api/v1/chat',
+        // Admin chat endpoints: the shop is resolved from @ShopSession().
+        '/api/v1/chat-admin',
+      ],
       shopify.validateAuthenticatedSession(),
     ),
   )
 
   nestApp
     .use('/api/webhooks', express.text({ type: '*/*' }))
+    // The storefront widget posts text/plain so the browser skips the
+    // CORS preflight probe. `shopify app dev` runs a proxy that answers
+    // OPTIONS itself without the CORS headers, which broke the widget in
+    // development. Parse the body as text here; the controller decodes it.
+    .use('/api/v1/chat/messages/stream', express.text({ type: '*/*' }))
     .use(express.json({ limit: '50mb' }))
 
   nestApp.use(shopify.cspHeaders())

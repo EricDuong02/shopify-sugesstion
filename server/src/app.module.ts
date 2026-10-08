@@ -9,13 +9,31 @@ import { ProductModule } from './modules/product/product.module'
 import { RecommenderModule } from './modules/recommender/recommender.module'
 import { RecommenderApiModule } from './modules/recommender-api/recommender-api.module'
 import { TokenModule } from './modules/token/token.module'
+import { ChatModule } from './modules/chat/chat.module'
+
+// Devtools is a debug-only module. It opens its own HTTP port, so a
+// hardcoded port makes every second Nest instance crash with EADDRINUSE,
+// including orphaned processes left behind by a killed dev session. The
+// port is configurable via DEVTOOLS_PORT (defaults to 5434), and the
+// module is not registered at all when NODE_ENV is production.
+function resolveDevtoolsPort(): number {
+  const parsed = parseInt(process.env.DEVTOOLS_PORT ?? '', 10)
+  return Number.isNaN(parsed) ? 5434 : parsed
+}
+
+const devtoolsImports =
+  process.env.NODE_ENV === 'production'
+    ? []
+    : [
+        DevtoolsModule.register({
+          http: true,
+          port: resolveDevtoolsPort(),
+        }),
+      ]
 
 @Module({
   imports: [
-    DevtoolsModule.register({
-      http: process.env.NODE_ENV !== 'production',
-      port: 5434,
-    }),
+    ...devtoolsImports,
     ConfigModule.forRoot(),
     SharedModule,
     WebhooksModule,
@@ -23,6 +41,7 @@ import { TokenModule } from './modules/token/token.module'
     RecommenderModule,
     RecommenderApiModule,
     TokenModule,
+    ChatModule,
   ],
   controllers: [],
   providers: [],

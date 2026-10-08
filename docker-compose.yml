@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: recommender-postgres
     restart: unless-stopped
     environment:
@@ -30,6 +30,20 @@ services:
     depends_on:
       - postgres
 
+  redis:
+    image: redis:7-alpine
+    container_name: recommender-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   ngrok:
     image: ngrok/ngrok:latest
     container_name: recommender-ngrok
@@ -46,3 +60,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
