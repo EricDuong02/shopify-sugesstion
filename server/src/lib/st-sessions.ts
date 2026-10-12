@@ -3,16 +3,25 @@ import { Session } from '@shopify/shopify-api'
 import { SessionStorage } from '@shopify/shopify-app-session-storage'
 
 export class STSessionStorage implements SessionStorage {
-  prisma: PrismaClient
+  private prisma: PrismaClient | undefined
 
-  constructor() {
-    this.prisma = new PrismaClient()
+  setPrisma(prisma: PrismaClient): void {
+    this.prisma = prisma
+  }
+
+  private get client(): PrismaClient {
+    if (!this.prisma) {
+      throw new Error(
+        'STSessionStorage has not been configured with PrismaService',
+      )
+    }
+    return this.prisma
   }
 
   async storeSession(session: Session): Promise<boolean> {
     const payload = { ...session } as unknown as Prisma.InputJsonObject
     try {
-      await this.prisma.appSession.upsert({
+      await this.client.appSession.upsert({
         where: { id: session.id },
         create: {
           id: session.id,
@@ -30,7 +39,7 @@ export class STSessionStorage implements SessionStorage {
   }
   async loadSession(id: string): Promise<Session> {
     try {
-      const data = await this.prisma.appSession.findUnique({
+      const data = await this.client.appSession.findUnique({
         where: { id: id },
       })
 
@@ -59,12 +68,12 @@ export class STSessionStorage implements SessionStorage {
       session.onlineAccessInfo = onlineAccessInfo
 
       return session
-    } catch (err) {
+    } catch {
       return undefined
     }
   }
   deleteSession(id: string): Promise<boolean> {
-    return this.prisma.appSession
+    return this.client.appSession
       .deleteMany({
         where: {
           id: {
@@ -72,15 +81,11 @@ export class STSessionStorage implements SessionStorage {
           },
         },
       })
-      .then((_) => {
-        return true
-      })
-      .catch((err) => {
-        return false
-      })
+      .then(() => true)
+      .catch(() => false)
   }
   deleteSessions(ids: string[]): Promise<boolean> {
-    return this.prisma.appSession
+    return this.client.appSession
       .deleteMany({
         where: {
           id: {
@@ -88,15 +93,11 @@ export class STSessionStorage implements SessionStorage {
           },
         },
       })
-      .then((_) => {
-        return true
-      })
-      .catch((err) => {
-        return false
-      })
+      .then(() => true)
+      .catch(() => false)
   }
   findSessionsByShop(shopName: string): Promise<Session[]> {
-    return this.prisma.appSession
+    return this.client.appSession
       .findMany({
         where: {
           shop: shopName,

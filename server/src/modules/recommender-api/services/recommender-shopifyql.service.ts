@@ -12,16 +12,15 @@ import {
   ShopifyOrdersQueryWithDateResponse,
 } from '@/types/Recommend'
 import { Injectable } from '@nestjs/common'
-import { PrismaClient } from '@prisma/client'
+import { PrismaService } from '@/shared/services/prisma.service'
 import { GraphqlClient } from '@shopify/shopify-api'
 import { GoogleAnalyst4 } from './googleAnalyst4.service'
 
 @Injectable()
 export class RecommenderApiService {
-  prisma: PrismaClient
   googleAnalyst: GoogleAnalyst4
-  constructor() {
-    this.prisma = new PrismaClient()
+
+  constructor(private readonly prisma: PrismaService) {
     this.googleAnalyst = new GoogleAnalyst4()
   }
 
@@ -1195,7 +1194,7 @@ export class RecommenderApiService {
   async fetchPurchaseWithLastPurchased(
     gqlClient: GraphqlClient,
     customerId: string,
-    combinedLists: { id: string; title: string; handle: string }[],
+    combinedLists: Array<{ id: string }>,
   ) {
     if (!customerId) {
       return []

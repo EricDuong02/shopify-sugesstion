@@ -37,9 +37,9 @@ All backend chat code lives in `server/src/modules/chat/`:
 | `llm/llm-registry.service.ts` | Builds the fallback chain and instantiates providers |
 | `llm/crypto.util.ts` | AES-256-GCM for merchant API keys |
 | `services/chat.service.ts` | Orchestrates one chat turn |
-| `services/retrieval.service.ts` | pgvector cosine search |
+| `services/retrieval.service.ts` | Hybrid structured SQL + pgvector product retrieval |
 | `services/rate-limit.service.ts` | Fixed-window rate limit, spend tracking, cost estimate |
-| `services/catalog-sync.service.ts` | Webhook sync, embedding, product snapshot |
+| `services/catalog-sync.service.ts` | First sync/webhook sync, structured catalog, embeddings |
 | `services/catalog-sync.processor.ts` | BullMQ worker |
 | `services/model-verification.service.ts` | Startup check for retired models |
 | `services/redis.client.ts` | Shared Redis client |
@@ -62,11 +62,11 @@ ChatService.streamChat
   2. rate limit per shop+IP           -> Redis fixed window
   3. get or create ChatSession
   4. persist the user message
-  5. RetrievalService.searchProducts  -> embed the question
-                                        pgvector cosine search, topK
+  5. RetrievalService.searchProducts  -> structured filters for exact facts
+                                        + pgvector semantic search, topK
         |
         v
-  6. build the system prompt          products injected as context
+  6. build the system prompt          products, options and variants injected as context
   7. walk the provider chain          openai -> gemini -> groq -> ollama
         |                             (respects fallbackMode)
         v
@@ -87,7 +87,7 @@ prompt and reports ok, error and latency.
 
 ## 4. Data model
 
-Four tables in `server/prisma/schema.prisma`.
+Core chat tables in `server/prisma/schema.prisma`.
 
 **`ChatShopConfig`** — one row per shop (`shopId` unique): enabled flag,
 provider and model choice, optional encrypted merchant API key
@@ -96,14 +96,23 @@ provider and model choice, optional encrypted merchant API key
 `fallbackMode` (default `free_first_paid_backup`),
 `fallbackBudgetCapUsdPerDay` (default 2.0).
 
-**`ProductEmbedding`** — one row per product per shop
-(`@@unique([shopId, shopifyProductId])`): the `vector(768)` embedding, a
-product snapshot (`productTitle`, `productHandle`, `productUrl`,
-`productImageUrl`, `price`) and a `contentHash`.
+**`CatalogProduct`** — the source of truth for synced Shopify product facts:
+title, handle, description, vendor, product type, tags, status, URL, featured
+image and price range. It is keyed by `shopId + shopifyProductId`.
 
-The snapshot lives on the embedding row so the chat path can render product
-cards without calling the Shopify API on every turn. `contentHash` lets the
-sync worker skip products whose text did not change.
+**`CatalogVariant`** — one row per Shopify variant. It stores price, compare-at
+price, SKU, barcode, availability, inventory quantity when available, and
+`selectedOptions` as JSON. This preserves arbitrary merchant-specific options
+such as `Color`, `Size`, `Material`, etc. without hardcoding a schema per shop.
+
+**`CatalogOption`** — product-level option names and values, e.g.
+`Color: Red, Blue` or `Size: S, M, L`.
+
+**`ProductEmbedding`** — the semantic vector index, not the product source of
+truth. It stores one `vector(768)` per product/chunk plus `contentHash` and the
+embedding input text. Legacy snapshot columns remain for compatibility, but
+retrieval joins back to `CatalogProduct`/`CatalogVariant`/`CatalogOption` for
+exact facts.
 
 **`ChatSession` / `ChatMessage`** — conversation history with `tokensIn`,
 `tokensOut`, `latencyMs`, `fallbackUsed` and `fallbackReason`, which feed
@@ -118,13 +127,22 @@ because Prisma cannot express pgvector indexes.
 
 ## 5. RAG pipeline
 
-1. The shopper's question is embedded into a 768-dimension vector.
-2. `RetrievalService` runs a pgvector cosine search filtered by `shopId`,
-   returning the top `topK` products with scores.
-3. `ChatService` injects those products (title, price, URL, image) into the
-   system prompt as grounded context and instructs the LLM to answer only
-   from that context.
-4. The LLM streams the answer as SSE. The widget renders the text and, from
+1. `RetrievalService` extracts simple structured intent from the shopper's
+   question: price bounds, SKU, quoted product names, and option terms such as
+   color or size.
+2. If structured intent exists, it queries `CatalogProduct`, `CatalogVariant`
+   and `CatalogOption` with SQL so exact facts are respected. Example: “under
+   $50” uses price columns instead of hoping vector similarity returns cheap
+   products.
+3. In parallel, the question is embedded into a 768-dimension vector and used
+   for pgvector cosine search over `ProductEmbedding` for semantic discovery.
+4. Results are merged and deduplicated. Structured/hybrid matches are preferred
+   for exact questions; semantic vector scores remain useful for broad
+   recommendation questions.
+5. `ChatService` injects rich context (title, URL, price range, vendor, tags,
+   options, variants, SKU and availability) into the system prompt and tells
+   the LLM to answer only from that context.
+6. The LLM streams the answer as SSE. The widget renders the text and, from
    the same retrieval result, the product cards.
 
 ## 6. LLM providers and the fallback chain
@@ -199,15 +217,20 @@ REST call.
 
 ## 8. Catalog sync
 
+After Shopify auth callback, the app enqueues an initial full catalog resync
+for the shop. The manual Config-tab resync button uses the same queue path.
+
 Shopify product webhooks (`products/create`, `products/update`,
 `products/delete`, all routed to the single `/api/webhooks` endpoint) enqueue
-one BullMQ job per product. The worker embeds the product (title,
-description, type, vendor, tags, prices, image alt text) and upserts
-`ProductEmbedding`; deletes remove the row.
+one BullMQ job per product. The worker syncs the structured catalog first
+(`CatalogProduct`, `CatalogVariant`, `CatalogOption`), then embeds a rich text
+document containing title, description, type, vendor, tags, option values,
+variant selected options, prices, SKU and availability. Deletes remove both the
+structured rows and the embedding row.
 
 Jobs use a deterministic id, `sync-{shop}-{productId}`, so webhook bursts
-such as bulk imports deduplicate naturally instead of embedding the same
-product N times.
+such as bulk imports deduplicate naturally instead of syncing and embedding the
+same product N times.
 
 BullMQ keeps terminal (`completed` or `failed`) jobs by default, and a
 terminal job with the same id blocks every future sync for that product.

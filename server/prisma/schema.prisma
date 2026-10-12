@@ -9,53 +9,57 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  shadowDatabaseUrl = env("SHADOW_DATABASE_URL") 
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
+/// Legacy shop/token record. Most Shopify auth state lives in AppSession.
 model Shop {
   id    String  @id @default(cuid())
   name  String  @unique
   token String?
 }
 
+/// Shopify app sessions persisted by STSessionStorage. Offline sessions are used for background sync and public recommender Admin API calls.
 model AppSession {
   id      String @id
   shop    String
   payload Json
 }
 
+/// Recommender campaign/root config created in the admin recommendation UI. This is not the AI chat catalog.
 model OfferProduct {
   id              Int              @id @default(autoincrement())
+  shopId          String
   name            String
   placeId         Int
   productGroups   ProductGroups[]
   triggerProduct  TriggerProduct?
   fallBackProduct FallBackProduct?
-  listProduct     ListProduct[]
+  items           OfferProductItem[]
+
+  @@unique([id, shopId])
+  @@index([shopId])
 }
 
-enum Status {
-  DRAFT
-  ACTIVE
+/// Canonical recommender-to-catalog join with offer-specific rank and source metadata.
+model OfferProductItem {
+  id               Int            @id @default(autoincrement())
+  offerProductId   Int
+  shopId           String
+  shopifyProductId String
+  position         Int?
+  source           String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  offerProduct     OfferProduct   @relation(fields: [offerProductId, shopId], references: [id, shopId], onDelete: Cascade)
+  catalogProduct   CatalogProduct @relation(fields: [shopId, shopifyProductId], references: [shopId, shopifyProductId], onDelete: Cascade)
+
+  @@unique([offerProductId, shopId, shopifyProductId])
+  @@index([shopId])
+  @@index([shopId, shopifyProductId])
 }
 
-model ListProduct {
-  id             Int           @id @default(autoincrement())
-  idProduct      String
-  url            String
-  avatarSource   String
-  name           String
-  handle         String
-  status         Status
-  price          Float
-  updatedAt      DateTime      @updatedAt
-  createdAt      DateTime      @default(now())
-  OfferProduct   OfferProduct? @relation(fields: [offerProductId], references: [id])
-  offerProductId Int?
-
-  @@unique([idProduct, offerProductId])
-}
-
+/// Recommender trigger/placement settings: pages where an OfferProduct is active and the trigger product rules.
 model TriggerProduct {
   id             Int             @id @default(autoincrement())
   pageIds        Int[]
@@ -67,6 +71,7 @@ model TriggerProduct {
   createdAt      DateTime        @default(now())
 }
 
+/// Fallback recommender config used when primary recommendation rules produce too few/no products.
 model FallBackProduct {
   id             Int             @id @default(autoincrement())
   productGroups  ProductGroups[]
@@ -76,6 +81,7 @@ model FallBackProduct {
   createdAt      DateTime        @default(now())
 }
 
+/// Polymorphic recommender product group. Depending on typeId/parent it can represent selected products, collections, conditions, trigger products, or fallback products.
 model ProductGroups {
   id                Int              @id @default(autoincrement())
   typeId            String[]
@@ -91,6 +97,7 @@ model ProductGroups {
   createdAt         DateTime         @default(now())
 }
 
+/// Recommender condition row. column/relation/value map to UI rule types such as SKU, created date, sales, collection, vendor, discount, etc.
 model Rules {
   id              Int            @id @default(autoincrement())
   column          Int
@@ -102,6 +109,7 @@ model Rules {
   createdAt       DateTime       @default(now())
 }
 
+/// Stored bearer token for legacy recommender-api middleware/config flows.
 model Tokens {
   id        Int      @id @default(autoincrement())
   name      String?
@@ -110,6 +118,7 @@ model Tokens {
   createdAt DateTime @default(now())
 }
 
+/// Per-shop AI chat configuration: provider/model, public token, prompt, rate limits, fallback and spend cap.
 model ChatShopConfig {
   id                          Int      @id @default(autoincrement())
   shopId                      String   @unique
@@ -128,23 +137,112 @@ model ChatShopConfig {
   updatedAt                   DateTime @updatedAt
 }
 
-model ProductEmbedding {
-  id              Int      @id @default(autoincrement())
-  shopId          String
-  shopifyProductId String
-  embedding       Unsupported("vector(768)")?
-  contentHash     String
-  productTitle    String?
-  productHandle   String?
-  productUrl      String?
-  productImageUrl String?
-  price           Float?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+/// Shop-scoped Shopify product catalog source of truth for AI chat and future enrichment. Synced from Shopify first sync, resync, and product webhooks.
+model CatalogProduct {
+  id                   Int              @id @default(autoincrement())
+  shopId               String
+  shopifyProductId     String
+  title                String
+  handle               String?
+  description          String?
+  descriptionHtml      String?
+  productType          String?
+  vendor               String?
+  tags                 String[]
+  status               String?
+  onlineStoreUrl       String?
+  featuredImageUrl     String?
+  featuredImageAltText String?
+  minPrice             Float?
+  maxPrice             Float?
+  currencyCode         String?
+  publishedAt          DateTime?
+  createdAtShopify     DateTime?
+  updatedAtShopify     DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  variants             CatalogVariant[]
+  options              CatalogOption[]
+  offerItems           OfferProductItem[]
 
   @@unique([shopId, shopifyProductId])
+  @@index([shopId])
+  @@index([shopId, title])
+  @@index([shopId, vendor])
+  @@index([shopId, productType])
+  @@index([shopId, minPrice])
+  @@index([shopId, maxPrice])
 }
 
+/// Shopify variant data for a CatalogProduct. selectedOptions stores custom merchant options like Color, Size, Material without hardcoding fields.
+model CatalogVariant {
+  id               Int            @id @default(autoincrement())
+  shopId           String
+  shopifyVariantId String
+  shopifyProductId String
+  title            String?
+  sku              String?
+  barcode          String?
+  price            Float?
+  compareAtPrice   Float?
+  currencyCode     String?
+  availableForSale Boolean?
+  inventoryQuantity Int?
+  selectedOptions  Json
+  imageUrl         String?
+  position         Int?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  product          CatalogProduct @relation(fields: [shopId, shopifyProductId], references: [shopId, shopifyProductId], onDelete: Cascade)
+
+  @@unique([shopId, shopifyVariantId])
+  @@index([shopId])
+  @@index([shopId, shopifyProductId])
+  @@index([shopId, sku])
+  @@index([shopId, price])
+  @@index([shopId, availableForSale])
+}
+
+/// Product-level option definitions and values, e.g. Color = Red/Blue and Size = S/M/L.
+model CatalogOption {
+  id               Int            @id @default(autoincrement())
+  shopId           String
+  shopifyProductId String
+  name             String
+  values           String[]
+  position         Int?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  product          CatalogProduct @relation(fields: [shopId, shopifyProductId], references: [shopId, shopifyProductId], onDelete: Cascade)
+
+  @@unique([shopId, shopifyProductId, name])
+  @@index([shopId])
+  @@index([shopId, shopifyProductId])
+  @@index([shopId, name])
+}
+
+/// Semantic vector index for AI chat retrieval. Exact product facts live in Catalog* tables; this stores embedding chunks only.
+model ProductEmbedding {
+  id               Int      @id @default(autoincrement())
+  shopId           String
+  shopifyProductId String
+  chunkType        String   @default("product")
+  text             String?
+  embedding        Unsupported("vector(768)")?
+  contentHash      String
+  productTitle     String?
+  productHandle    String?
+  productUrl       String?
+  productImageUrl  String?
+  price            Float?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([shopId, shopifyProductId, chunkType])
+  @@index([shopId])
+}
+
+/// Storefront AI chat conversation session for one shop/customer browser session.
 model ChatSession {
   id        String   @id @default(cuid())
   shopId    String
@@ -155,6 +253,7 @@ model ChatSession {
   @@index([shopId, startedAt])
 }
 
+/// Individual chat message and usage telemetry for monitoring, cost estimates, latency and fallback analytics.
 model ChatMessage {
   id             Int      @id @default(autoincrement())
   sessionId      String

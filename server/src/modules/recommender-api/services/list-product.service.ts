@@ -3,16 +3,14 @@ import { Product } from '@/types/Recommend'
 import { Injectable } from '@nestjs/common'
 import { GraphqlClient } from '@shopify/shopify-api'
 import { ProductCount } from './product-count.service'
-import { RecommenderApiService } from './recommender-shopifyql.service'
+import { RecommenderApiService as RecommenderShopifyQlService } from './recommender-shopifyql.service'
 
 @Injectable()
 export class ListProductService {
-  recommenderApiService: RecommenderApiService
-  productCount: ProductCount
-  constructor() {
-    this.recommenderApiService = new RecommenderApiService()
-    this.productCount = new ProductCount()
-  }
+  constructor(
+    private readonly recommenderApiService: RecommenderShopifyQlService,
+    private readonly productCount: ProductCount,
+  ) {}
 
   mergeLists(list1: Product[], list2: Product[]) {
     const mergedList = [...list1, ...list2]
@@ -145,10 +143,17 @@ export class ListProductService {
       updatedAt: Date
       createdAt: Date
     }[],
+    customerId?: string,
   ) {
     const limit = limitProduct || LIMIT_DEFAULT
 
-    if (rules[0]?.value.length == 0 || typeId.length == 0) {
+    if (typeId.length === 0) {
+      return []
+    }
+    if (
+      typeId.includes('3') &&
+      rules.some((rule) => rule.column < 13 && rule.value.length === 0)
+    ) {
       return []
     }
     let combinedLists: Product[] = []
@@ -418,8 +423,8 @@ export class ListProductService {
               }
 
               if (index === 0) {
-                endCursor = listDiscountRange.endCursor
-                hasNextPage = listDiscountRange.hasNextPage
+                endCursor = listProductImpression.endCursor
+                hasNextPage = listProductImpression.hasNextPage
               }
 
               combinedLists =
@@ -462,29 +467,38 @@ export class ListProductService {
     if (typeId.includes('1')) {
       for (const rule of rules) {
         switch (rule.column) {
-          case 13:
-            //TODO need update logic
-            // const purchaseWithLastPurchased =
-            //   await this.recommenderApiService.fetchPurchaseWithLastPurchased(
-            //     gqlClient,
-            //     query.customerId, //TODO need change to customer Id
-            //     combinedLists,
-            //   )
+          case 13: {
+            if (!customerId) return []
 
-            // if (purchaseWithLastPurchased.length === 0) {
-            //   return [] // Stop loop when not have product satisfied
-            // }
+            const purchaseWithLastPurchased =
+              await this.recommenderApiService.fetchPurchaseWithLastPurchased(
+                gqlClient,
+                customerId,
+                combinedLists,
+              )
 
-            // combinedLists =
-            //   //check combinedLists.length > 0 because first time combinedLists = [] can insert value to filter data
-            //   combinedLists.length > 0
-            //     ? combinedLists.filter((itemA) =>
-            //         purchaseWithLastPurchased.some(
-            //           (itemB) => itemA.id === itemB.id,
-            //         ),
-            //       )
-            //     : purchaseWithLastPurchased
+            if (purchaseWithLastPurchased.length === 0) return []
+
+            const purchasedProducts: Product[] = purchaseWithLastPurchased.map(
+              (product) => ({
+                id: product.id,
+                url: `#${product.handle}`,
+                avatarSource: '',
+                name: product.title,
+                handle: product.handle,
+                status: 'ACTIVE',
+                price: 0,
+              }),
+            )
+
+            combinedLists =
+              combinedLists.length > 0
+                ? combinedLists.filter((itemA) =>
+                    purchasedProducts.some((itemB) => itemA.id === itemB.id),
+                  )
+                : purchasedProducts
             break
+          }
           case 14:
             const bundleDeals =
               await this.recommenderApiService.fetchBundleDeals(gqlClient)

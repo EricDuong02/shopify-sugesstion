@@ -1,13 +1,9 @@
 import { Injectable } from '@nestjs/common'
-import { PrismaClient } from '@prisma/client'
+import { PrismaService } from '@/shared/services/prisma.service'
 
 @Injectable()
 export class TokenService {
-  prisma: PrismaClient
-
-  constructor() {
-    this.prisma = new PrismaClient()
-  }
+  constructor(private readonly prisma: PrismaService) {}
   async upsertToken(body) {
     return this.prisma.tokens.upsert({
       where: {

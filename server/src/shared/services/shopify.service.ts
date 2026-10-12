@@ -1,16 +1,15 @@
-import { Injectable, Optional } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import '@shopify/shopify-api/adapters/node'
-import { GraphqlClient } from '@shopify/shopify-api'
-import { RestClient } from '@shopify/shopify-api/dist/ts/lib/clients/admin/rest/client'
+import { GraphqlClient, RestClient, Session } from '@shopify/shopify-api'
+import { PrismaService } from './prisma.service'
 
 import shopify from '@/lib/shopify-app'
-import { PrismaService } from './prisma.service'
 
 @Injectable()
 export class ShopifyService {
-  shopifyApp: typeof shopify
+  readonly shopifyApp: typeof shopify
 
-  constructor(@Optional() public readonly prisma?: PrismaService) {
+  constructor(private readonly prisma: PrismaService) {
     this.shopifyApp = shopify
   }
 
@@ -22,6 +21,50 @@ export class ShopifyService {
     return new this.shopifyApp.api.clients.Graphql({ session })
   }
 
+  async getClientForShop(shop: string, apiType: 'rest' | 'gql' = 'gql') {
+    const session = await this.getOfflineSession(shop)
+    return apiType === 'rest'
+      ? this.getRestClient(session)
+      : this.getGQLClient(session)
+  }
+
+  async getOfflineSession(shop: string): Promise<Session> {
+    const shopDomain = normalizeShopDomain(shop)
+    const records = await this.prisma.appSession.findMany({
+      where: { shop: shopDomain },
+    })
+    const record = records.find((candidate) => {
+      const payload = candidate.payload as {
+        isOnline?: boolean
+        accessToken?: string
+      } | null
+      return payload?.isOnline === false && Boolean(payload.accessToken)
+    })
+
+    if (!record) {
+      throw new NotFoundException(
+        `Offline session not found for shop ${shopDomain}.`,
+      )
+    }
+
+    const payload = record.payload as {
+      accessToken: string
+      scope?: string
+      state?: string
+      expires?: string | Date
+    }
+
+    return new Session({
+      id: record.id,
+      shop: shopDomain,
+      state: payload.state ?? 'storefront-recommender',
+      isOnline: false,
+      accessToken: payload.accessToken,
+      scope: payload.scope,
+      expires: payload.expires ? new Date(payload.expires) : undefined,
+    })
+  }
+
   get app() {
     return this.shopifyApp
   }
@@ -29,4 +72,12 @@ export class ShopifyService {
   get api() {
     return this.shopifyApp.api
   }
+}
+
+function normalizeShopDomain(shop: string): string {
+  const normalized = shop.trim().toLowerCase()
+  if (!normalized.endsWith('.myshopify.com')) {
+    throw new NotFoundException('Invalid shop domain.')
+  }
+  return normalized
 }

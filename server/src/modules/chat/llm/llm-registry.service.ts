@@ -105,7 +105,11 @@ export class LlmRegistryService {
     switch (id) {
       case 'openai':
         if (!apiKey) return null
-        return new OpenAICompatibleProvider({ id: 'openai', apiKey, isPaid: true })
+        return new OpenAICompatibleProvider({
+          id: 'openai',
+          apiKey,
+          isPaid: true,
+        })
 
       case 'groq':
         if (!apiKey) return null
@@ -121,7 +125,11 @@ export class LlmRegistryService {
         if (!rawBase) return null
         const trimmed = rawBase.replace(/\/+$/, '')
         const baseURL = trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`
-        return new OpenAICompatibleProvider({ id: 'ollama', baseURL, isPaid: false })
+        return new OpenAICompatibleProvider({
+          id: 'ollama',
+          baseURL,
+          isPaid: false,
+        })
       }
 
       case 'gemini':

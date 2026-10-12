@@ -6,7 +6,7 @@ import {
 } from '@/const'
 import { listAttribute, listModule, pageOptions } from '@/data'
 import { useApi } from '@/hooks/useApi'
-import { GetDataResult, ListProduct, Rule } from '@/types/recommended'
+import { GetDataResult, RecommendedProduct, Rule } from '@/types/recommended'
 import { useToast } from '@shopify/app-bridge-react'
 import {
   DynamicList,
@@ -30,16 +30,16 @@ const useRecommend = (props: any) => {
 
   //Fetch data product
   const {
-    data: listProductPassCondition,
+    data: productsPassCondition,
     isLoading,
-    refetch: refetchListProduct,
+    refetch: refetchProducts,
   } = useQuery<{
-    data: ListProduct[]
+    data: RecommendedProduct[]
   }>(
     ['listData'],
     () => api.get(`v1/recommender-api/recommends-app?id=${slug}`),
     {
-      enabled: true,
+      enabled: slug !== 'create',
       refetchOnWindowFocus: false,
     }
   )
@@ -321,7 +321,7 @@ const useRecommend = (props: any) => {
           }
           await api.post(PRODUCT_RECOMMENDER_CREATE, data)
 
-          refetchListProduct()
+          refetchProducts()
           show('Success! 🎉', {
             duration: 2000,
             onDismiss: () => {
@@ -371,7 +371,7 @@ const useRecommend = (props: any) => {
             scheduleOn: fieldValues.trigger.scheduleOn.value,
           }
           await api.post(PRODUCT_RECOMMENDER_UPDATE, data)
-          refetchListProduct()
+          refetchProducts()
           show('Success! 🎉', {
             duration: 2000,
             onDismiss: () => console.log('👋 Toast dismissed'),
@@ -451,7 +451,7 @@ const useRecommend = (props: any) => {
     productRules,
     triggerRules,
     autoRecommend,
-    listProductPassCondition: listProductPassCondition,
+    productsPassCondition: productsPassCondition,
     isLoadingProduct: isLoading,
     fallbackRules,
     fallbackAutoRecommend,

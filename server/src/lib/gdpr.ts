@@ -13,8 +13,7 @@ export default {
   CUSTOMERS_DATA_REQUEST: {
     deliveryMethod: DeliveryMethod.Http,
     callbackUrl: '/api/webhooks',
-    callback: async (topic, shop, body, webhookId) => {
-      const payload = JSON.parse(body)
+    callback: async () => {
       // Payload has the following shape:
       // {
       //   "shop_id": 954889,
@@ -45,8 +44,7 @@ export default {
   CUSTOMERS_REDACT: {
     deliveryMethod: DeliveryMethod.Http,
     callbackUrl: '/api/webhooks',
-    callback: async (topic, shop, body, webhookId) => {
-      const payload = JSON.parse(body)
+    callback: async () => {
       // Payload has the following shape:
       // {
       //   "shop_id": 954889,
@@ -74,8 +72,7 @@ export default {
   SHOP_REDACT: {
     deliveryMethod: DeliveryMethod.Http,
     callbackUrl: '/api/webhooks',
-    callback: async (topic, shop, body, webhookId) => {
-      const payload = JSON.parse(body)
+    callback: async () => {
       // Payload has the following shape:
       // {
       //   "shop_id": 954889,

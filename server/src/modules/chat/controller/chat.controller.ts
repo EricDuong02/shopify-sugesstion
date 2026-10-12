@@ -76,7 +76,7 @@ export class ChatController {
         if (res.writableEnded) break
         res.write(`data: ${JSON.stringify(event)}\n\n`)
       }
-    } catch (error) {
+    } catch {
       if (!res.writableEnded) {
         res.write(
           `data: ${JSON.stringify({

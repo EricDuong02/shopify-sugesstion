@@ -1,10 +1,8 @@
-import { db } from '../lib/db'
+import { PrismaService } from '@/shared/services/prisma.service'
 
-export const getToken = async () => {
+export const getToken = async (prisma: PrismaService) => {
   try {
-    const token = await db.tokens.findFirst()
-
-    return token
+    return await prisma.tokens.findFirst()
   } catch {
     return null
   }

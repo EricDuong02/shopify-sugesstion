@@ -8,7 +8,7 @@ import { Button, FormLayout, Page } from '@shopify/polaris'
 import Products from './product/Products'
 
 const RecommendForm = () => {
-  const { hookForm, slug, listProductPassCondition } = useRecommendContext()
+  const { hookForm, slug, productsPassCondition } = useRecommendContext()
 
   const {
     submit,
@@ -23,8 +23,8 @@ const RecommendForm = () => {
           <TriggerPages />
           {trigger.value.pageIds.value.includes('4') && <TriggerProducts />}
           <RecommendProducts />
-          {listProductPassCondition?.data &&
-          listProductPassCondition?.data.length < 10 &&
+          {productsPassCondition?.data &&
+          productsPassCondition?.data.length < 10 &&
           slug != 'create' ? (
             <FallBackRecommend />
           ) : (

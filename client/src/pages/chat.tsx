@@ -24,6 +24,7 @@ interface ChatStats {
   tokens: { in: number; out: number }
   latencyMsAvg: number | null
   embeddings: number
+  catalogProducts: number
   spendTodayUsd: number
 }
 
@@ -67,7 +68,7 @@ export default function ChatMonitoringPage() {
     try {
       const response = await api.get('/v1/chat-admin/stats')
       setStats(response.data)
-    } catch (err) {
+    } catch {
       setError('Could not load chat statistics. Please try again.')
     } finally {
       setLoading(false)
@@ -134,9 +135,9 @@ export default function ChatMonitoringPage() {
               value={`$${Number(stats.spendTodayUsd || 0).toFixed(4)}`}
             />
             <StatCard
-              title="Indexed products"
-              value={formatInt(stats.embeddings)}
-              subtitle={`shop ${stats.shop}`}
+              title="Synced products"
+              value={formatInt(stats.catalogProducts ?? stats.embeddings)}
+              subtitle={`${formatInt(stats.embeddings)} embeddings · shop ${stats.shop}`}
             />
           </InlineGrid>
 

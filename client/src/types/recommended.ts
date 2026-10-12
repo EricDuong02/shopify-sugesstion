@@ -61,22 +61,14 @@ export type OfferProduct = {
 
 export type GetDataResult = OfferProduct[]
 
-enum Status {
-  DRAFT = 'DRAFT',
-  ACTIVE = 'ACTIVE',
-}
-export type ListProduct = {
-  id: number
-  idProduct: string
-  url: string
-  avatarSource: string
+export type RecommendedProduct = {
+  id: string
+  url: string | null
+  avatarSource: string | null
   name: string
-  handle: string
-  status: Status
-  price: number
-  updatedAt: Date
-  createdAt: Date
-  offerProductId: number | null
+  handle: string | null
+  status: string | null
+  price: number | null
 }
 
 export enum PageType {

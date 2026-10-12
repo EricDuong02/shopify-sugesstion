@@ -1,19 +1,42 @@
 import { DATA_PER_PAGE, MAX_QUERY_NUMBER } from '@/const/utils'
 import { FetchBrandsResponse, FetchCategoryResponse } from '@/types/Recommend'
-import { Injectable } from '@nestjs/common'
-import { PrismaClient } from '@prisma/client'
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common'
+import { PrismaService } from '@/shared/services/prisma.service'
 import { GraphqlClient } from '@shopify/shopify-api'
+import { ListProductService } from '@/modules/recommender-api/services/list-product.service'
 import { CreateProductRecommenderDto } from '../dtos/create-product-recommender.dto'
 import { GetDetail } from '../dtos/get-detail.dto'
 import { RecommendDto } from '../dtos/recommends.dto'
 import { UpdateProductRecommenderDto } from '../dtos/update-product-recommender.dto'
 
+type RecommenderRuleInput = {
+  id?: string | number
+  column: string | number
+  relation: string | number
+  value: string[]
+}
+
+type ProductGroupInput = {
+  typeId: string[]
+  ids: Array<string | number>
+  rules: RecommenderRuleInput[]
+}
+
+type OfferCandidate = {
+  id: string | null
+  source: 'trigger' | 'fallback'
+}
+
 @Injectable()
 export class RecommenderService {
-  prisma: PrismaClient
-  constructor() {
-    this.prisma = new PrismaClient()
-  }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly listProductService: ListProductService,
+  ) {}
 
   async fetchProductsGQL(gqlClient, query) {
     const search = query.search
@@ -95,13 +118,136 @@ export class RecommenderService {
     return { data: allCollections }
   }
 
+  private normalizeProductId(
+    value: string | number | null | undefined,
+  ): string | null {
+    if (value === null || value === undefined) return null
+    const normalized = String(value).trim().split('/').pop()
+    return normalized || null
+  }
+
+  private normalizeConditionRules(rules: RecommenderRuleInput[]) {
+    return rules.map((rule, index) => ({
+      id: Number(rule.id) || index,
+      column: Number(rule.column),
+      relation: Number(rule.relation),
+      value: rule.value,
+      productGroupsId: null,
+      updatedAt: new Date(),
+      createdAt: new Date(),
+    }))
+  }
+
+  private async resolveOfferItems(
+    gqlClient: GraphqlClient,
+    shop: string,
+    triggerGroup: ProductGroupInput,
+    fallbackGroup?: ProductGroupInput,
+  ) {
+    const resolveGroup = async (
+      group: ProductGroupInput | undefined,
+      source: OfferCandidate['source'],
+    ): Promise<OfferCandidate[]> => {
+      if (!group) return []
+
+      if (
+        group.typeId.includes('1') &&
+        group.rules.some((rule) => rule.column === 13)
+      ) {
+        throw new ConflictException(
+          'Customer-specific recommendation rules require a customer context and cannot be persisted',
+        )
+      }
+
+      const explicit = (group.ids ?? []).map((id) => ({
+        id: this.normalizeProductId(id),
+        source,
+      }))
+      const evaluated =
+        group.rules?.length > 0 && group.typeId?.length > 0
+          ? await this.listProductService.getDataByCondition(
+              gqlClient,
+              100,
+              group.typeId,
+              this.normalizeConditionRules(group.rules),
+            )
+          : []
+
+      return [
+        ...explicit,
+        ...evaluated.map((product) => ({
+          id: this.normalizeProductId(product.id),
+          source,
+        })),
+      ]
+    }
+
+    const candidates = [
+      ...(await resolveGroup(triggerGroup, 'trigger')),
+      ...(await resolveGroup(fallbackGroup, 'fallback')),
+    ]
+    const uniqueCandidates = candidates.filter(
+      (candidate, index, all) =>
+        candidate.id &&
+        all.findIndex((item) => item.id === candidate.id) === index,
+    )
+    const ids = uniqueCandidates.flatMap((candidate) =>
+      candidate.id ? [candidate.id] : [],
+    )
+
+    if (ids.length === 0) return []
+
+    const catalogProducts = await this.prisma.catalogProduct.findMany({
+      where: {
+        shopId: shop,
+        shopifyProductId: { in: ids },
+      },
+      select: { shopifyProductId: true },
+    })
+    const catalogIds = new Set(
+      catalogProducts.map((product) => product.shopifyProductId),
+    )
+    const missingCatalogIds = ids.filter((id) => !catalogIds.has(id))
+    if (missingCatalogIds.length > 0) {
+      throw new ConflictException(
+        `Catalog sync is incomplete for products: ${missingCatalogIds.join(', ')}`,
+      )
+    }
+
+    return uniqueCandidates
+      .filter(
+        (candidate): candidate is OfferCandidate & { id: string } =>
+          candidate.id !== null && catalogIds.has(candidate.id),
+      )
+      .map((candidate, position) => ({
+        shopId: shop,
+        shopifyProductId: candidate.id,
+        position,
+        source: candidate.source,
+      }))
+  }
+
   async createData(
     gqlClient: GraphqlClient,
+    shop: string,
     dataForm: CreateProductRecommenderDto,
   ) {
+    const fallbackGroup =
+      dataForm.fallback.productGroups.ids.length > 0 ||
+      dataForm.fallback.productGroups.rules.length > 0
+        ? dataForm.fallback.productGroups
+        : undefined
+    const offerItems = await this.resolveOfferItems(
+      gqlClient,
+      shop,
+      dataForm.trigger.productGroups,
+      fallbackGroup,
+    )
+
     return await this.prisma.$transaction(async (tx) => {
       const createOffer = await tx.offerProduct.create({
         data: {
+          shopId: shop,
           name: dataForm.name,
           placeId: +dataForm.placeId,
           triggerProduct: {
@@ -161,30 +307,33 @@ export class RecommenderService {
                 : {}),
             },
           },
-          ...(dataForm.fallback.productGroups.typeId.length > 0 &&
-          dataForm.trigger.productGroups.rules.length > 0
+          ...(dataForm.fallback.productGroups.ids.length > 0 ||
+          dataForm.fallback.productGroups.rules.length > 0
             ? {
                 fallBackProduct: {
                   create: {
                     productGroups: {
                       create: {
-                        typeId: dataForm.trigger.productGroups.typeId,
-                        ids: dataForm.trigger.productGroups.ids,
-                        rules: {
-                          create: dataForm.trigger.productGroups.rules.map(
-                            (data: {
-                              column: string
-                              relation: string
-                              value: string[]
-                            }) => {
-                              return {
-                                column: +data.column,
-                                relation: +data.relation,
-                                value: data.value,
-                              }
-                            },
-                          ),
-                        },
+                        typeId: dataForm.fallback.productGroups.typeId,
+                        ids: dataForm.fallback.productGroups.ids,
+                        ...(dataForm.fallback.productGroups.rules.length > 0
+                          ? {
+                              rules: {
+                                create:
+                                  dataForm.fallback.productGroups.rules.map(
+                                    (data: {
+                                      column: string
+                                      relation: string
+                                      value: string[]
+                                    }) => ({
+                                      column: +data.column,
+                                      relation: +data.relation,
+                                      value: data.value,
+                                    }),
+                                  ),
+                              },
+                            }
+                          : {}),
                       },
                     },
                   },
@@ -194,14 +343,46 @@ export class RecommenderService {
         },
       })
 
+      if (offerItems.length > 0) {
+        await tx.offerProductItem.createMany({
+          data: offerItems.map((item) => ({
+            ...item,
+            offerProductId: createOffer.id,
+          })),
+        })
+      }
+
       return createOffer
     })
   }
 
   async updateData(
     gqlClient: GraphqlClient,
+    shop: string,
     dataForm: UpdateProductRecommenderDto,
   ) {
+    const offer = await this.prisma.offerProduct.findFirst({
+      where: { id: +dataForm.id, shopId: shop },
+      select: { id: true },
+    })
+    if (!offer) {
+      throw new NotFoundException(
+        `OfferProduct with id ${dataForm.id} not found`,
+      )
+    }
+
+    const fallbackGroup =
+      dataForm.fallback.productGroups.ids.length > 0 ||
+      dataForm.fallback.productGroups.rules.length > 0
+        ? dataForm.fallback.productGroups
+        : undefined
+    const offerItems = await this.resolveOfferItems(
+      gqlClient,
+      shop,
+      dataForm.trigger.productGroups,
+      fallbackGroup,
+    )
+
     const currentTriggerProductGroupsRules = await this.prisma.rules.findMany({
       where: {
         productGroupsId: +dataForm.trigger.productGroups.id,
@@ -262,53 +443,42 @@ export class RecommenderService {
                     data: {
                       typeId: dataForm.trigger.productGroups.typeId,
                       ids: dataForm.trigger.productGroups.ids,
-                      ...(dataForm.trigger.productGroups.rules.length > 0
-                        ? {
-                            rules: {
-                              upsert: dataForm.trigger.productGroups.rules.map(
-                                (data: {
-                                  id: string
-                                  column: string
-                                  relation: string
-                                  value: string[]
-                                }) => {
-                                  return {
-                                    where: {
-                                      id: +data.id,
-                                    },
-                                    create: {
-                                      column: +data.column,
-                                      relation: +data.relation,
-                                      value: data.value,
-                                    },
-                                    update: {
-                                      column: +data.column,
-                                      relation: +data.relation,
-                                      value: data.value,
-                                    },
-                                  }
-                                },
-                              ),
-                              deleteMany: {
-                                productGroupsId:
-                                  +dataForm.trigger.productGroups.id,
-                                id: {
-                                  in: rulesTriggerToDelete.map(
-                                    (rule) => rule.id,
-                                  ),
-                                },
-                              },
+                      rules: {
+                        upsert: dataForm.trigger.productGroups.rules.map(
+                          (data: {
+                            id: string
+                            column: string
+                            relation: string
+                            value: string[]
+                          }) => ({
+                            where: { id: +data.id },
+                            create: {
+                              column: +data.column,
+                              relation: +data.relation,
+                              value: data.value,
                             },
-                          }
-                        : {}),
+                            update: {
+                              column: +data.column,
+                              relation: +data.relation,
+                              value: data.value,
+                            },
+                          }),
+                        ),
+                        deleteMany: {
+                          productGroupsId: +dataForm.trigger.productGroups.id,
+                          id: {
+                            in: rulesTriggerToDelete.map((rule) => rule.id),
+                          },
+                        },
+                      },
                     },
                   },
                 },
               },
             },
           },
-          ...(dataForm.fallback.productGroups.typeId.length > 0 &&
-          dataForm.trigger.productGroups.rules.length > 0
+          ...(dataForm.fallback.productGroups.ids.length > 0 ||
+          dataForm.fallback.productGroups.rules.length > 0
             ? {
                 fallBackProduct: {
                   upsert: {
@@ -345,23 +515,19 @@ export class RecommenderService {
                             ids: dataForm.fallback.productGroups.ids,
                             rules: {
                               upsert: dataForm.fallback.productGroups.rules.map(
-                                (data) => {
-                                  return {
-                                    where: {
-                                      id: +data.id,
-                                    },
-                                    create: {
-                                      column: +data.column,
-                                      relation: +data.relation,
-                                      value: data.value,
-                                    },
-                                    update: {
-                                      column: +data.column,
-                                      relation: +data.relation,
-                                      value: data.value,
-                                    },
-                                  }
-                                },
+                                (data) => ({
+                                  where: { id: +data.id },
+                                  create: {
+                                    column: +data.column,
+                                    relation: +data.relation,
+                                    value: data.value,
+                                  },
+                                  update: {
+                                    column: +data.column,
+                                    relation: +data.relation,
+                                    value: data.value,
+                                  },
+                                }),
                               ),
                               deleteMany: {
                                 productGroupsId:
@@ -380,7 +546,7 @@ export class RecommenderService {
                   },
                 },
               }
-            : {}),
+            : { fallBackProduct: { delete: true } }),
           productGroups: {
             update: {
               where: {
@@ -389,42 +555,34 @@ export class RecommenderService {
               data: {
                 typeId: dataForm.productGroups.typeId,
                 ids: dataForm.productGroups.ids,
-                ...(dataForm.productGroups.rules.length > 0
-                  ? {
-                      rules: {
-                        upsert: dataForm.productGroups.rules.map(
-                          (data: {
-                            id: string
-                            column: string
-                            relation: string
-                            value: string[]
-                          }) => {
-                            return {
-                              where: {
-                                id: +data.id,
-                              },
-                              create: {
-                                column: +data.column,
-                                relation: +data.relation,
-                                value: data.value,
-                              },
-                              update: {
-                                column: +data.column,
-                                relation: +data.relation,
-                                value: data.value,
-                              },
-                            }
-                          },
-                        ),
-                        deleteMany: {
-                          productGroupsId: +dataForm.trigger.productGroups.id,
-                          id: {
-                            in: rulesToDelete.map((rule) => rule.id),
-                          },
-                        },
+                rules: {
+                  upsert: dataForm.productGroups.rules.map(
+                    (data: {
+                      id: string
+                      column: string
+                      relation: string
+                      value: string[]
+                    }) => ({
+                      where: { id: +data.id },
+                      create: {
+                        column: +data.column,
+                        relation: +data.relation,
+                        value: data.value,
                       },
-                    }
-                  : {}),
+                      update: {
+                        column: +data.column,
+                        relation: +data.relation,
+                        value: data.value,
+                      },
+                    }),
+                  ),
+                  deleteMany: {
+                    productGroupsId: +dataForm.productGroups.id,
+                    id: {
+                      in: rulesToDelete.map((rule) => rule.id),
+                    },
+                  },
+                },
               },
             },
           },
@@ -456,81 +614,26 @@ export class RecommenderService {
         // },
       })
 
-      // const productGroups = updateData.triggerProduct.productGroups[0]
-      // const typeId = productGroups.typeId
-      // const rules = productGroups.rules
-      // const listDataTrigger = await this.listProductService.getDataByCondition(
-      //   gqlClient,
-      //   100,
-      //   typeId,
-      //   rules,
-      // )
-
-      // const fallbackProductGroups = updateData.fallBackProduct
-      //   ? updateData.fallBackProduct.productGroups[0]
-      //   : null
-      // const listDataFallback = fallbackProductGroups
-      //   ? await this.listProductService.getDataByCondition(
-      //       gqlClient,
-      //       100,
-      //       fallbackProductGroups.typeId,
-      //       fallbackProductGroups.rules,
-      //     )
-      //   : []
-
-      // const mergedData = this.listProductService.mergeLists(
-      //   listDataTrigger,
-      //   listDataFallback,
-      // )
-
-      // if (mergedData.length > 0) {
-      //   await tx.offerProduct.update({
-      //     where: {
-      //       id: updateData.id,
-      //     },
-      //     data: {
-      //       listProduct: {
-      //         deleteMany: {
-      //           offerProductId: updateData.id,
-      //         },
-      //         upsert: mergedData.map((data) => ({
-      //           where: {
-      //             idProduct_offerProductId: {
-      //               idProduct: data.id,
-      //               offerProductId: updateData.id,
-      //             },
-      //           },
-      //           create: {
-      //             idProduct: data.id,
-      //             url: data.url,
-      //             avatarSource: data.avatarSource,
-      //             name: data.name,
-      //             status: data.status,
-      //             price: data.price,
-      //             handle: data.handle,
-      //           },
-      //           update: {
-      //             idProduct: data.id,
-      //             url: data.url,
-      //             avatarSource: data.avatarSource,
-      //             name: data.name,
-      //             status: data.status,
-      //             price: data.price,
-      //             handle: data.handle,
-      //           },
-      //         })),
-      //       },
-      //     },
-      //   })
-      // }
+      await tx.offerProductItem.deleteMany({
+        where: { offerProductId: updateData.id, shopId: shop },
+      })
+      if (offerItems.length > 0) {
+        await tx.offerProductItem.createMany({
+          data: offerItems.map((item) => ({
+            ...item,
+            offerProductId: updateData.id,
+          })),
+        })
+      }
 
       return updateData
     })
   }
 
-  async getData(query: GetDetail) {
-    return await this.prisma.offerProduct.findMany({
+  async getData(shop: string, query: GetDetail) {
+    const offers = await this.prisma.offerProduct.findMany({
       where: {
+        shopId: shop,
         id: +query.id || undefined,
       },
       include: {
@@ -557,20 +660,60 @@ export class RecommenderService {
             },
           },
         },
-        listProduct: true,
+        items: {
+          where: { shopId: shop },
+          include: {
+            catalogProduct: true,
+          },
+          orderBy: { position: 'asc' },
+        },
       },
     })
+
+    return offers.map((offer) => this.withProducts(offer))
   }
 
-  async getFirstData(query: RecommendDto) {
-    return await this.prisma.offerProduct.findFirst({
+  async getFirstData(shop: string, query: RecommendDto) {
+    const offer = await this.prisma.offerProduct.findFirst({
       where: {
+        shopId: shop,
         id: +query.id || undefined,
       },
       include: {
-        listProduct: true,
+        items: {
+          where: { shopId: shop },
+          include: {
+            catalogProduct: true,
+          },
+          orderBy: { position: 'asc' },
+        },
       },
     })
+
+    return offer ? this.withProducts(offer) : null
+  }
+
+  private withProducts(offer: any) {
+    const { items, ...rest } = offer
+    return {
+      ...rest,
+      products: (items ?? []).map((item) => {
+        const product = item.catalogProduct
+        return {
+          id: product.shopifyProductId,
+          url:
+            product.onlineStoreUrl ||
+            (product.handle
+              ? `https://${product.shopId}/products/${product.handle}`
+              : null),
+          avatarSource: product.featuredImageUrl,
+          name: product.title,
+          handle: product.handle,
+          status: product.status,
+          price: product.minPrice,
+        }
+      }),
+    }
   }
 
   async getNameCategory(gqlClient, value: string[]) {

@@ -57,7 +57,11 @@ export class ModelVerificationService implements OnModuleInit {
 
     await Promise.all(
       specs.map(async (spec) => {
-        const apiKey = this.readEnv(spec.id === 'gemini' ? 'GEMINI_API_KEY' : `${spec.id.toUpperCase()}_API_KEY`)
+        const apiKey = this.readEnv(
+          spec.id === 'gemini'
+            ? 'GEMINI_API_KEY'
+            : `${spec.id.toUpperCase()}_API_KEY`,
+        )
         if (!apiKey) {
           this.logger.warn(
             `[${spec.id}] no API key in env, skipping model verification`,
@@ -92,8 +96,10 @@ export class ModelVerificationService implements OnModuleInit {
   }
 
   private checkChatModel(spec: ProviderSpec, available: string[]): void {
-    const configured =
-      this.configService.get<string>('CHAT_DEFAULT_LLM_MODEL', '')
+    const configured = this.configService.get<string>(
+      'CHAT_DEFAULT_LLM_MODEL',
+      '',
+    )
     if (!configured) return
 
     if (available.includes(configured)) {
@@ -134,8 +140,7 @@ export class ModelVerificationService implements OnModuleInit {
   }
 
   private readEnv(key: string): string | undefined {
-    const value =
-      this.configService.get<string>(key) ?? process.env[key] ?? ''
+    const value = this.configService.get<string>(key) ?? process.env[key] ?? ''
     return value.trim() ? value.trim() : undefined
   }
 

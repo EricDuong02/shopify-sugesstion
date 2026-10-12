@@ -22,9 +22,9 @@ const Products = () => {
   const [accountStatus, setAccountStatus] = useState<string[]>(['active'])
   const [queryValue, setQueryValue] = useState<string | undefined>('')
 
-  const { listProductPassCondition, isLoadingProduct } = useRecommendContext()
+  const { productsPassCondition, isLoadingProduct } = useRecommendContext()
 
-  const items = listProductPassCondition?.data || []
+  const items = productsPassCondition?.data || []
 
   const handleTaggedWithChange = useCallback(
     (key: string) => (value: string | string[] | number | [number, number]) => {
@@ -178,14 +178,14 @@ const Products = () => {
   function renderItem(item: (typeof items)[number]) {
     const { id, url, name, avatarSource, status } = item
     const media = (
-      <Avatar customer size="md" name={name} source={avatarSource} />
+      <Avatar customer size="md" name={name} source={avatarSource ?? undefined} />
     )
 
     return (
       <ResourceItem
         verticalAlignment="center"
         id={id.toString()}
-        url={url}
+        url={url ?? '#'}
         media={media}
         accessibilityLabel={`View details for ${name}`}
         name={name}

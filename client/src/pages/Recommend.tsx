@@ -35,9 +35,9 @@ const Recommend = () => {
     useIndexResourceState(offerData)
 
   const rowMarkup = offerData.map(
-    ({ id, name, trigger, condition, listProduct }, index) => {
-      const listTitleProduct = listProduct
-        ? listProduct.map((data) => data.name)
+    ({ id, name, trigger, condition, products }, index) => {
+      const listTitleProduct = products
+        ? products.map((data) => data.name)
         : []
 
       return (

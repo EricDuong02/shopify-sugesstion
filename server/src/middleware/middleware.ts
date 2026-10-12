@@ -1,6 +1,5 @@
 import { Injectable, NestMiddleware } from '@nestjs/common'
 import { Request, Response, NextFunction } from 'express'
-import { getToken } from '../data/token'
 
 @Injectable()
 export class AuthMiddleware implements NestMiddleware {

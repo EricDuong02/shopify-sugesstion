@@ -1,5 +1,3 @@
-import { Status } from '@prisma/client'
-
 export type ShopifyOrdersQueryResponse = {
   orders: {
     edges: Array<{
@@ -107,7 +105,7 @@ export type DataProductResponseWithPrice = {
           id: string
           title: string
           handle: string
-          status: Status
+          status: string
           media: {
             edges: {
               node: {
@@ -146,7 +144,7 @@ export type Product = {
   avatarSource: string
   name: string
   handle: string
-  status: Status
+  status: string
   price: number
 }
 
@@ -154,7 +152,7 @@ export type ProductGql = {
   id: string
   title: string
   handle: string
-  status: Status
+  status: string
   media: {
     edges: {
       node: {

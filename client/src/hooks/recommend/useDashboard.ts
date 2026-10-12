@@ -1,6 +1,6 @@
 import { PRODUCT_RECOMMENDER_DATA } from '@/const'
 import { useApi } from '@/hooks/useApi'
-import { ListProduct } from '@/types/recommended'
+import { RecommendedProduct } from '@/types/recommended'
 import { useQuery } from '@tanstack/react-query'
 
 const useDashboard = () => {
@@ -13,7 +13,7 @@ const useDashboard = () => {
       trigger: string
       condition: string
       active: boolean
-      listProduct: ListProduct[]
+      products: RecommendedProduct[]
     }[]
   }>(
     ['data-table'],

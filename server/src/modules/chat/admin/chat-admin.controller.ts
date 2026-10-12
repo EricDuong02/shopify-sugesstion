@@ -9,12 +9,12 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common'
-import { PrismaClient } from '@prisma/client'
+import { PrismaService } from '@/shared/services/prisma.service'
 import { randomUUID } from 'crypto'
 import { encryptSecret } from '../llm/crypto.util'
 import { LlmProviderId } from '../llm/llm-provider.interface'
 import { LlmRegistryService } from '../llm/llm-registry.service'
-import { CatalogSyncService } from '../services/catalog-sync.service'
+import { CatalogSyncService } from '../../catalog/services/catalog-sync.service'
 import { RateLimitService } from '../services/rate-limit.service'
 import { ShopAuthGuard } from './shop-auth.guard'
 import { VerifiedShop } from './verified-shop.decorator'
@@ -61,9 +61,8 @@ const TEST_PROMPT = 'Reply with the single word: OK'
 @UseGuards(ShopAuthGuard)
 @Controller({ path: 'chat-admin', version: '1' })
 export class ChatAdminController {
-  private readonly prisma = new PrismaClient()
-
   constructor(
+    private readonly prisma: PrismaService,
     private readonly catalogSync: CatalogSyncService,
     private readonly rateLimit: RateLimitService,
     private readonly llmRegistry: LlmRegistryService,
@@ -110,7 +109,8 @@ export class ChatAdminController {
     if (body.llmApiKey) {
       try {
         data.llmApiKeyEnc = encryptSecret(body.llmApiKey)
-      } catch (error) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      } catch (e) {
         throw new BadRequestException(
           'Could not encrypt the API key. Set CONFIG_ENCRYPTION_KEY on the server.',
         )
@@ -143,7 +143,9 @@ export class ChatAdminController {
    * prompt so merchants find out before a real chat message fails.
    */
   @Post('test-provider')
-  async testProvider(@Body() body: TestProviderBody): Promise<TestProviderResult> {
+  async testProvider(
+    @Body() body: TestProviderBody,
+  ): Promise<TestProviderResult> {
     const providerId = toProviderId(body.llmProvider)
     const model = (body.llmModel || '').trim()
 
@@ -220,6 +222,7 @@ export class ChatAdminController {
       assistantAgg,
       fallbackCount,
       embeddingCount,
+      catalogProductCount,
       perDay,
     ] = await Promise.all([
       this.prisma.chatSession.count({ where: { shopId: shop } }),
@@ -246,6 +249,7 @@ export class ChatAdminController {
         },
       }),
       this.prisma.productEmbedding.count({ where: { shopId: shop } }),
+      this.prisma.catalogProduct.count({ where: { shopId: shop } }),
       this.prisma.$queryRaw<DayCount[]>`
         SELECT to_char(date_trunc('day', m."createdAt"), 'YYYY-MM-DD') AS day,
                COUNT(*)::int AS count
@@ -276,6 +280,7 @@ export class ChatAdminController {
       },
       latencyMsAvg: assistantAgg._avg.latencyMs ?? null,
       embeddings: embeddingCount,
+      catalogProducts: catalogProductCount,
       spendTodayUsd,
     }
   }

@@ -10,9 +10,7 @@
 export type LlmProviderId = 'openai' | 'gemini' | 'groq' | 'ollama'
 
 export type FallbackMode =
-  | 'free_only'
-  | 'free_first_paid_backup'
-  | 'paid_primary'
+  'free_only' | 'free_first_paid_backup' | 'paid_primary'
 
 export interface LlmChatMessage {
   role: 'system' | 'user' | 'assistant'

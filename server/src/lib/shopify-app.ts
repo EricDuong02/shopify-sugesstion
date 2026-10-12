@@ -3,6 +3,8 @@ import { ApiVersion, LogSeverity } from '@shopify/shopify-api'
 import { shopifyApp } from '@shopify/shopify-app-express'
 import { STSessionStorage } from './st-sessions'
 
+export const sessionStorage = new STSessionStorage()
+
 const host = process.env.HOST ?? 'https://example.com'
 const apiConfig = {
   apiKey: process.env.SHOPIFY_API_KEY ?? 'test-api-key',
@@ -26,7 +28,7 @@ const shopify = shopifyApp({
     // We are going to use nest js to handle this in webhooks.controller.ts
     path: '/api/webhooks',
   },
-  sessionStorage: new STSessionStorage(),
+  sessionStorage,
 })
 
 export default shopify

@@ -1,4 +1,6 @@
-import { vi } from 'vitest'
+// @vitest-environment jsdom
+
+import { expect, it, vi } from 'vitest'
 import { useParams } from 'react-router-dom'
 import { mount } from './test/mount'
 

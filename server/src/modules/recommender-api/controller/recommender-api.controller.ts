@@ -1,4 +1,4 @@
-import { ShopifyServer } from '@/decorators/shop-server.decorator'
+import { ShopifyServer, ShopifyShop } from '@/decorators/shop-server.decorator'
 import { Controller, Get, Query } from '@nestjs/common'
 import { GraphqlClient } from '@shopify/shopify-api'
 import { RecommendDto, RecommendListDto } from '../dtos/recommends.dto'
@@ -14,6 +14,7 @@ export class RecommenderApiController {
   @Get('recommends')
   async fetchListProduct(
     @ShopifyServer('gql') gqlClient: GraphqlClient,
+    @ShopifyShop() shop: string,
     @Query() query: RecommendDto,
   ) {
     if (!query) {
@@ -22,6 +23,7 @@ export class RecommenderApiController {
     const dataOfferProduct = await this.recommenderApiService.getData(
       gqlClient,
       query,
+      shop,
     )
 
     return {
@@ -36,22 +38,25 @@ export class RecommenderApiController {
 
   @Get('recommends-app')
   async fetchListProductForApp(
-    @ShopifyServer('gql') gqlClient: GraphqlClient,
+    @ShopifyShop() shop: string,
     @Query() query: RecommendDto,
   ) {
     if (!query) {
       throw new Error('Fail to fetch recommend')
     }
-    const dataOfferProduct = await this.recommenderApiService.getData(
-      gqlClient,
+    const dataOfferProduct = await this.recommenderApiService.getPersistedData(
       query,
+      shop,
     )
 
     return dataOfferProduct.products
   }
 
   @Get('recommends/list')
-  async fetchListRecommend(@Query() query: RecommendListDto) {
+  async fetchListRecommend(
+    @ShopifyShop() shop: string,
+    @Query() query: RecommendListDto,
+  ) {
     const pageType = query.pageType
     const limit = query.limit
     const search = query.search || undefined
@@ -62,6 +67,7 @@ export class RecommenderApiController {
       +limit,
       search,
       listIds,
+      shop,
     )
     return dataCondition
   }

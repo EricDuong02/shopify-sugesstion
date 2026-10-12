@@ -102,7 +102,7 @@ export default function ChatConfigPage() {
       setFallbackMode(cfg.fallbackMode)
       setBudgetCap(String(cfg.fallbackBudgetCapUsdPerDay))
       setApiKey('')
-    } catch (err) {
+    } catch {
       setBanner({
         tone: 'critical',
         message: 'Could not load chat configuration.',
@@ -143,7 +143,7 @@ export default function ChatConfigPage() {
       setHasCustomApiKey(cfg.hasCustomApiKey)
       setApiKey('')
       setBanner({ tone: 'success', message: 'Configuration saved.' })
-    } catch (err) {
+    } catch {
       setBanner({
         tone: 'critical',
         message: 'Could not save configuration. Please try again.',
@@ -161,7 +161,7 @@ export default function ChatConfigPage() {
         tone: 'success',
         message: 'Custom API key removed. Platform keys will be used.',
       })
-    } catch (err) {
+    } catch {
       setBanner({ tone: 'critical', message: 'Could not remove the API key.' })
     }
   }
@@ -175,7 +175,7 @@ export default function ChatConfigPage() {
         llmModel,
       })
       setTestResult(response.data as TestResult)
-    } catch (err) {
+    } catch {
       setTestResult({
         ok: false,
         error: 'Could not reach the test endpoint.',
@@ -191,9 +191,9 @@ export default function ChatConfigPage() {
       await api.post('/v1/chat-admin/resync')
       setBanner({
         tone: 'success',
-        message: 'Catalog resync queued. Embeddings update in the background.',
+        message: 'Catalog resync queued. Product data and embeddings update in the background.',
       })
-    } catch (err) {
+    } catch {
       setBanner({ tone: 'critical', message: 'Could not queue the resync.' })
     } finally {
       setResyncing(false)
@@ -369,9 +369,9 @@ export default function ChatConfigPage() {
                   Catalog index
                 </Text>
                 <Text as="p" tone="subdued">
-                  Re-embed the whole product catalog. Product changes are synced
-                  automatically through webhooks; use this after changing
-                  embedding settings or to rebuild the index.
+                  Resync Shopify product data, variants, options, and embeddings.
+                  Product changes are synced automatically through webhooks; use
+                  this to rebuild the catalog index.
                 </Text>
                 <InlineStack>
                   <Button

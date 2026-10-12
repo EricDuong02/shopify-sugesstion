@@ -10,6 +10,7 @@ import { RecommenderModule } from './modules/recommender/recommender.module'
 import { RecommenderApiModule } from './modules/recommender-api/recommender-api.module'
 import { TokenModule } from './modules/token/token.module'
 import { ChatModule } from './modules/chat/chat.module'
+import { CatalogModule } from './modules/catalog/catalog.module'
 
 // Devtools is a debug-only module. It opens its own HTTP port, so a
 // hardcoded port makes every second Nest instance crash with EADDRINUSE,
@@ -41,6 +42,7 @@ const devtoolsImports =
     RecommenderModule,
     RecommenderApiModule,
     TokenModule,
+    CatalogModule,
     ChatModule,
   ],
   controllers: [],

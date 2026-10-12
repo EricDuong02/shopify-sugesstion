@@ -1,9 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
-import { PrismaClient } from '@prisma/client'
+import { PrismaService } from '@/shared/services/prisma.service'
 import { LlmRegistryService } from '../llm/llm-registry.service'
 import {
   LlmChatMessage,
-  LlmProvider,
   LlmProviderError,
   LlmProviderId,
 } from '../llm/llm-provider.interface'
@@ -13,6 +12,8 @@ import { RetrievedProduct, RetrievalService } from './retrieval.service'
 const MAX_MESSAGE_LENGTH = 2000
 const HISTORY_LIMIT = 10
 const PROVIDER_TIMEOUT_MS = 45000
+const DESCRIPTION_SNIPPET_LENGTH = 220
+const VARIANT_CONTEXT_LIMIT = 8
 
 export interface StreamChatInput {
   shop: string
@@ -25,7 +26,12 @@ export interface StreamChatInput {
 export type ChatStreamEvent =
   | { type: 'token'; text: string }
   | { type: 'products'; products: RetrievedProduct[] }
-  | { type: 'done'; sessionId: string; providerId: string; fallbackUsed: boolean }
+  | {
+      type: 'done'
+      sessionId: string
+      providerId: string
+      fallbackUsed: boolean
+    }
   | { type: 'error'; message: string }
 
 /**
@@ -35,9 +41,8 @@ export type ChatStreamEvent =
  */
 @Injectable()
 export class ChatService {
-  private readonly prisma = new PrismaClient()
-
   constructor(
+    private readonly prisma: PrismaService,
     private readonly llmRegistry: LlmRegistryService,
     private readonly retrieval: RetrievalService,
     private readonly rateLimit: RateLimitService,
@@ -221,7 +226,7 @@ export class ChatService {
             tokensOut,
             latencyMs,
             fallbackUsed,
-            fallbackReason: fallbackUsed ? lastError?.message ?? null : null,
+            fallbackReason: fallbackUsed ? (lastError?.message ?? null) : null,
           },
         })
 
@@ -234,7 +239,10 @@ export class ChatService {
             ? error
             : new LlmProviderError(provider.id, 'unknown', String(error))
 
-        console.error(`[chat] provider ${provider.id} failed:`, lastError.message)
+        console.error(
+          `[chat] provider ${provider.id} failed:`,
+          lastError.message,
+        )
 
         if (!lastError.isFallbackable) {
           yield { type: 'error', message: 'Chat failed. Please try again.' }
@@ -278,9 +286,10 @@ export class ChatService {
       [
         'You are a helpful shopping assistant for an online store.',
         "Detect the customer's language from their message and always reply in that same language.",
-        'Only recommend products from the list provided below.',
+        'Only recommend or describe products from the catalog context provided below.',
+        'For exact questions about price, variant, color, size, SKU, or availability, use the structured fields in the context.',
+        'If the requested product, option, variant, or fact is not present in the context, say so honestly instead of guessing.',
         'When you mention a product, include its name and URL so the customer can click through.',
-        'If no product matches, say so honestly instead of inventing one.',
         'Keep answers concise and friendly.',
       ].join(' ')
 
@@ -289,14 +298,81 @@ export class ChatService {
     }
 
     const catalog = products
-      .map(
-        (p, i) =>
-          `${i + 1}. ${p.title ?? 'Untitled product'}` +
-          (p.price != null ? ` — $${p.price}` : '') +
-          (p.url ? ` — ${p.url}` : ''),
-      )
-      .join('\n')
+      .map((product, index) => this.formatProductContext(product, index))
+      .join('\n\n')
 
     return `${base}\n\nRelevant products from the catalog (sorted by relevance):\n${catalog}`
+  }
+
+  private formatProductContext(
+    product: RetrievedProduct,
+    index: number,
+  ): string {
+    const price = this.formatPriceRange(product)
+    const options = product.options
+      .map((option) => `${option.name}: ${option.values.join(', ')}`)
+      .join('; ')
+    const variants = product.variants
+      .slice(0, VARIANT_CONTEXT_LIMIT)
+      .map((variant) => {
+        const selected = Object.entries(variant.selectedOptions)
+          .map(([name, value]) => `${name}: ${value}`)
+          .join(', ')
+        return [
+          variant.title || selected || 'Default variant',
+          selected ? `options ${selected}` : null,
+          variant.sku ? `SKU ${variant.sku}` : null,
+          variant.price != null
+            ? `price ${this.formatMoney(variant.price, product.currencyCode)}`
+            : null,
+          variant.availableForSale != null
+            ? variant.availableForSale
+              ? 'available'
+              : 'unavailable'
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' — ')
+      })
+      .join('\n     - ')
+    const tags = product.tags.length ? product.tags.join(', ') : null
+    const description = product.description
+      ? product.description.slice(0, DESCRIPTION_SNIPPET_LENGTH)
+      : null
+
+    return [
+      `${index + 1}. ${product.title ?? 'Untitled product'}`,
+      product.url ? `   URL: ${product.url}` : null,
+      price ? `   Price: ${price}` : null,
+      product.vendor ? `   Vendor: ${product.vendor}` : null,
+      product.productType ? `   Type: ${product.productType}` : null,
+      tags ? `   Tags: ${tags}` : null,
+      options ? `   Options: ${options}` : null,
+      variants ? `   Variants:\n     - ${variants}` : null,
+      description ? `   Description: ${description}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
+
+  private formatPriceRange(product: RetrievedProduct): string | null {
+    if (product.minPrice == null && product.maxPrice == null) return null
+    if (product.minPrice === product.maxPrice || product.maxPrice == null) {
+      return this.formatMoney(product.minPrice, product.currencyCode)
+    }
+    if (product.minPrice == null)
+      return this.formatMoney(product.maxPrice, product.currencyCode)
+    return `${this.formatMoney(product.minPrice, product.currencyCode)} - ${this.formatMoney(
+      product.maxPrice,
+      product.currencyCode,
+    )}`
+  }
+
+  private formatMoney(
+    value: number | null,
+    currencyCode: string | null,
+  ): string {
+    if (value == null) return 'n/a'
+    return `${currencyCode ? `${currencyCode} ` : '$'}${value}`
   }
 }

@@ -1,4 +1,5 @@
 import { ShopClient } from '@/decorators/shop-client.decorator'
+import { ShopSession } from '@/decorators/shop-session.decorator'
 import { Body, Controller, Get, Post, Query } from '@nestjs/common'
 import { RecommenderService } from '../services/recommender.service'
 import { listAttribute, listConditions, pageOptions } from '@/data'
@@ -74,27 +75,38 @@ export class RecommenderController {
   @Post('create')
   async submitData(
     @ShopClient('gql') gqlClient: GraphqlClient,
+    @ShopSession() session,
     @Body() body: CreateProductRecommenderDto,
   ) {
-    const data = await this.recommenderService.createData(gqlClient, body)
+    const data = await this.recommenderService.createData(
+      gqlClient,
+      session.shop,
+      body,
+    )
     return data
   }
 
   @Post('update')
   async updateData(
     @ShopClient('gql') gqlClient: GraphqlClient,
+    @ShopSession() session,
     @Body() body: UpdateProductRecommenderDto,
   ) {
-    const data = await this.recommenderService.updateData(gqlClient, body)
+    const data = await this.recommenderService.updateData(
+      gqlClient,
+      session.shop,
+      body,
+    )
     return data
   }
 
   @Get('data')
   async getData(
     @ShopClient('gql') gqlClient: GraphqlClient,
+    @ShopSession() session,
     @Query() query: GetData,
   ) {
-    const data = await this.recommenderService.getData(query)
+    const data = await this.recommenderService.getData(session.shop, query)
 
     const remakeData = await Promise.all(
       data.map(async (data) => {
@@ -151,15 +163,15 @@ export class RecommenderController {
           })
           .join(', '),
         active: data.triggerProduct.scheduleOn,
-        listProduct: data.listProduct,
+        products: data.products,
       }
     })
 
     return dataFinal
   }
   @Get('detail')
-  async getDetail(@Query() query: GetDetail) {
-    const data = await this.recommenderService.getData(query)
+  async getDetail(@ShopSession() session, @Query() query: GetDetail) {
+    const data = await this.recommenderService.getData(session.shop, query)
 
     return data
   }
@@ -176,17 +188,18 @@ export class RecommenderController {
   }
 
   @Get('recommends')
-  async fetchListProduct(@Query() query: RecommendDto) {
+  async fetchListProduct(@ShopSession() session, @Query() query: RecommendDto) {
     if (!query) {
       throw new Error('Fail to fetch recommend')
     }
-    const dataOfferProduct = await this.recommenderService.getFirstData(query)
-    if (!dataOfferProduct && !dataOfferProduct.listProduct) {
+    const dataOfferProduct = await this.recommenderService.getFirstData(
+      session.shop,
+      query,
+    )
+    if (!dataOfferProduct || !dataOfferProduct.products) {
       return []
     }
 
-    const listProduct = dataOfferProduct.listProduct
-
-    return listProduct
+    return dataOfferProduct.products
   }
 }

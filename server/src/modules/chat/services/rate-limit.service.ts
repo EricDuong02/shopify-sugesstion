@@ -21,8 +21,7 @@ export function estimateCostUsd(
 ): number {
   const pricing = MODEL_PRICING_USD_PER_1M[model] ?? UNKNOWN_MODEL_PRICING
   return (
-    (tokensIn / 1_000_000) * pricing.in +
-    (tokensOut / 1_000_000) * pricing.out
+    (tokensIn / 1_000_000) * pricing.in + (tokensOut / 1_000_000) * pricing.out
   )
 }
 

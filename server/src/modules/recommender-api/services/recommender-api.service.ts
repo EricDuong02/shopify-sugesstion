@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
-import { PrismaClient } from '@prisma/client'
+import { PrismaService } from '@/shared/services/prisma.service'
 import { RecommendDto } from '../dtos/recommends.dto'
 import { PageType } from '@/types/RecommendApi'
 import { pageOptions } from '@/data'
@@ -8,17 +8,25 @@ import { GraphqlClient } from '@shopify/shopify-api'
 
 @Injectable()
 export class RecommenderApiService {
-  prisma: PrismaClient
-  listProductService: ListProductService
-  constructor() {
-    this.prisma = new PrismaClient()
-    this.listProductService = new ListProductService()
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly listProductService: ListProductService,
+  ) {}
+
+  private offerId(value: string): number {
+    const id = Number(value)
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new NotFoundException(`OfferProduct with id ${value} not found`)
+    }
+    return id
   }
 
-  async getData(gqlClient: GraphqlClient, query: RecommendDto) {
+  /** Storefront-only path: evaluate the offer rules against this shop's ShopifyQL client. */
+  async getData(gqlClient: GraphqlClient, query: RecommendDto, shop: string) {
     const dataCondition = await this.prisma.offerProduct.findFirst({
       where: {
-        id: +query.id || undefined,
+        shopId: shop,
+        id: this.offerId(query.id),
       },
       include: {
         productGroups: {
@@ -48,9 +56,7 @@ export class RecommenderApiService {
     })
 
     if (!dataCondition) {
-      throw new NotFoundException(
-        `OfferProduct with id ${query.id} not found`,
-      )
+      throw new NotFoundException(`OfferProduct with id ${query.id} not found`)
     }
 
     if (!dataCondition.triggerProduct) {
@@ -87,6 +93,7 @@ export class RecommenderApiService {
       50,
       typeId,
       rules,
+      query.customerId,
     )
 
     const fallbackProductGroups = dataCondition.fallBackProduct
@@ -98,6 +105,7 @@ export class RecommenderApiService {
           50,
           fallbackProductGroups.typeId,
           fallbackProductGroups.rules,
+          query.customerId,
         )
       : []
 
@@ -113,21 +121,82 @@ export class RecommenderApiService {
     }
   }
 
+  /**
+   * Read the canonical offer snapshot used by the embedded admin UI.
+   *
+   * Unlike the storefront endpoint above, this path must not re-evaluate
+   * ShopifyQL rules against a client selected by request data. OfferProductItem
+   * is populated during offer create/update and joins to CatalogProduct with
+   * the same shop key, so a mismatched shop cannot expose another tenant's
+   * products.
+   */
+  async getPersistedData(query: RecommendDto, shop: string) {
+    const dataCondition = await this.prisma.offerProduct.findFirst({
+      where: {
+        shopId: shop,
+        id: this.offerId(query.id),
+      },
+      select: {
+        id: true,
+        name: true,
+        items: {
+          where: { shopId: shop },
+          orderBy: { position: 'asc' },
+          select: {
+            catalogProduct: {
+              select: {
+                shopifyProductId: true,
+                onlineStoreUrl: true,
+                featuredImageUrl: true,
+                title: true,
+                handle: true,
+                status: true,
+                minPrice: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    if (!dataCondition) {
+      throw new NotFoundException(`OfferProduct with id ${query.id} not found`)
+    }
+
+    return {
+      id: dataCondition.id,
+      name: dataCondition.name,
+      products: dataCondition.items.map(({ catalogProduct }) => ({
+        id: catalogProduct.shopifyProductId,
+        url: catalogProduct.onlineStoreUrl,
+        avatarSource: catalogProduct.featuredImageUrl,
+        name: catalogProduct.title,
+        handle: catalogProduct.handle,
+        status: catalogProduct.status,
+        price: catalogProduct.minPrice,
+      })),
+    }
+  }
+
   async getManyData(
     pageType: PageType,
     limit = 20,
     search: string | undefined,
     listIds: string | undefined,
+    shop: string,
   ) {
     if (!Object.values(PageType).includes(pageType as PageType)) {
       throw new Error(`${pageType} is a valid PageType.`)
     }
 
-    const valuePage = pageOptions.find(
-      (data) => data.pageOptions === pageType,
-    ).value
+    const pageOption = pageOptions.find((data) => data.pageOptions === pageType)
+    if (!pageOption) {
+      throw new Error(`${pageType} is a valid PageType.`)
+    }
+    const valuePage = pageOption.value
     const data = await this.prisma.offerProduct.findMany({
       where: {
+        shopId: shop,
         name: {
           search: search,
         },

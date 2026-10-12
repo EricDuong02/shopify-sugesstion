@@ -1,21 +1,23 @@
 import { Controller, HttpCode, Optional, Post, Req, Res } from '@nestjs/common'
 import { Request, Response } from 'express'
-import { PrismaClient } from '@prisma/client'
+import { PrismaService } from '@/shared/services/prisma.service'
 import { ShopifyService } from '@/shared/services/shopify.service'
-import { CatalogSyncService } from '../chat/services/catalog-sync.service'
-
-const prisma = new PrismaClient()
+import { CatalogSyncService } from '../catalog/services/catalog-sync.service'
 
 @Controller('webhooks')
 export class WebhooksController {
   constructor(
+    private readonly prisma: PrismaService,
     @Optional() private readonly shopify: ShopifyService,
     @Optional() private readonly catalogSync: CatalogSyncService,
   ) {}
 
   @Post()
   @HttpCode(200)
-  async handleWebhook(@Req() req: Request, @Res() res: Response): Promise<void> {
+  async handleWebhook(
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
     try {
       // validate() checks the HMAC signature. On success it returns
       // { valid: true, topic, domain, ... }, otherwise { valid: false, reason }
@@ -35,7 +37,9 @@ export class WebhooksController {
       switch (data.topic) {
         case 'APP_UNINSTALLED':
           // Shop uninstalled the app: drop its sessions so a reinstall starts clean
-          await prisma.appSession.deleteMany({ where: { shop: data.domain } })
+          await this.prisma.appSession.deleteMany({
+            where: { shop: data.domain },
+          })
           console.log(`Deleted sessions for uninstalled shop ${data.domain}`)
           break
         case 'SCOPES_UPDATE':
@@ -59,7 +63,10 @@ export class WebhooksController {
     }
   }
 
-  private async handleProductUpsert(domain: string, rawBody: any): Promise<void> {
+  private async handleProductUpsert(
+    domain: string,
+    rawBody: any,
+  ): Promise<void> {
     const productId = extractProductIdFromBody(rawBody)
     if (!domain || !productId) return
     if (!this.catalogSync) {
@@ -69,7 +76,10 @@ export class WebhooksController {
     await this.catalogSync.enqueueProductSync(domain, productId)
   }
 
-  private async handleProductDelete(domain: string, rawBody: any): Promise<void> {
+  private async handleProductDelete(
+    domain: string,
+    rawBody: any,
+  ): Promise<void> {
     const productId = extractProductIdFromBody(rawBody)
     if (!domain || !productId) return
     if (!this.catalogSync) {

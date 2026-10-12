@@ -3,15 +3,16 @@ import { readFileSync } from 'fs'
 import * as express from 'express'
 import { Request, Response, NextFunction } from 'express'
 import * as serveStatic from 'serve-static'
-
-// This project does not enable esModuleInterop, so the CommonJS default
-// export has to be required rather than default-imported.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const cors = require('cors')
+import * as cors from 'cors'
 
 import shopify from './lib/shopify-app.js'
 import bootstrap from './nest-main.js'
 import setupSwagger from './lib/setup-swagger.js'
+import { CatalogSyncService } from './modules/catalog/services/catalog-sync.service.js'
+import { PrismaService } from './shared/services/prisma.service.js'
+import { ShopifyService } from './shared/services/shopify.service.js'
+import { configureShopifyServerDecorator } from './decorators/shop-server.decorator.js'
+import { sessionStorage } from './lib/shopify-app.js'
 
 const PORT = parseInt(
   process.env.BACKEND_PORT || process.env.PORT || '3000',
@@ -67,13 +68,9 @@ async function main() {
     }),
   )
 
-  // Set up Shopify authentication and webhook handling
+  // Set up Shopify authentication. The callback route is registered after
+  // Nest boots so it can enqueue the initial catalog sync through DI.
   app.get(shopify.config.auth.path, shopify.auth.begin())
-  app.get(
-    shopify.config.auth.callbackPath,
-    shopify.auth.callback(),
-    shopify.redirectToShopifyOrAppRoot(),
-  )
 
   // For webhooks, see webhook.controller.ts
 
@@ -81,6 +78,30 @@ async function main() {
   // also add a proxy rule for them in web/frontend/vite.config.js
 
   const nestApp = await bootstrap(app)
+  const prisma = nestApp.get(PrismaService)
+  sessionStorage.setPrisma(prisma)
+  configureShopifyServerDecorator(nestApp.get(ShopifyService))
+  const catalogSync = nestApp.get(CatalogSyncService)
+
+  app.get(
+    shopify.config.auth.callbackPath,
+    shopify.auth.callback(),
+    async (req: Request, res: Response, next: NextFunction) => {
+      const shop = res.locals?.shopify?.session?.shop
+      if (shop) {
+        try {
+          await catalogSync.enqueueInitialCatalogResync(shop)
+        } catch (error) {
+          console.error(
+            `[auth] failed to enqueue initial catalog sync for ${shop}:`,
+            error,
+          )
+        }
+      }
+      next()
+    },
+    shopify.redirectToShopifyOrAppRoot(),
+  )
 
   nestApp.use(
     '/api/*',
