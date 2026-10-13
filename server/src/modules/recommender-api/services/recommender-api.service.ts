@@ -1,8 +1,46 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common'
 import { PrismaService } from '@/shared/services/prisma.service'
 import { RecommendDto } from '../dtos/recommends.dto'
+import { ThemeRecommendationDto } from '../dtos/theme-recommendation.dto'
 import { PageType } from '@/types/RecommendApi'
 import { pageOptions } from '@/data'
+
+const THEME_DEFAULT_PRODUCT_LIMIT = 8
+const THEME_MAX_PRODUCT_LIMIT = 50
+
+function isPageType(value: string): value is PageType {
+  return Object.values(PageType).some((pageType) => pageType === value)
+}
+
+function pageIdForType(pageType: PageType): number {
+  const pageOption = pageOptions.find(
+    (option) => option.pageOptions === pageType,
+  )
+  if (!pageOption) {
+    throw new BadRequestException(
+      `Page type ${pageType} is not supported by recommendation placements`,
+    )
+  }
+
+  return Number(pageOption.value)
+}
+
+function themeProductLimit(rawLimit: string | undefined): number {
+  if (!rawLimit) return THEME_DEFAULT_PRODUCT_LIMIT
+
+  const limit = Number(rawLimit)
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new BadRequestException(
+      'Recommendation product limit must be positive',
+    )
+  }
+
+  return Math.min(limit, THEME_MAX_PRODUCT_LIMIT)
+}
 import { ListProductService } from './list-product.service'
 import { GraphqlClient } from '@shopify/shopify-api'
 
@@ -178,20 +216,81 @@ export class RecommenderApiService {
     }
   }
 
+  async getThemeData(query: ThemeRecommendationDto, shop: string) {
+    const pageId = pageIdForType(query.pageType)
+    const productLimit = themeProductLimit(query.limit)
+    const dataCondition = await this.prisma.offerProduct.findFirst({
+      where: {
+        shopId: shop,
+        id: this.offerId(query.id),
+        triggerProduct: {
+          is: {
+            scheduleOn: true,
+            pageIds: { has: pageId },
+          },
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        items: {
+          where: { shopId: shop },
+          orderBy: { position: 'asc' },
+          take: productLimit,
+          select: {
+            catalogProduct: {
+              select: {
+                shopifyProductId: true,
+                onlineStoreUrl: true,
+                featuredImageUrl: true,
+                title: true,
+                handle: true,
+                status: true,
+                minPrice: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    if (!dataCondition) {
+      throw new NotFoundException(
+        `Active OfferProduct with id ${query.id} is not configured for ${query.pageType}`,
+      )
+    }
+
+    return {
+      id: dataCondition.id,
+      name: dataCondition.name,
+      products: dataCondition.items.map(({ catalogProduct }) => ({
+        id: catalogProduct.shopifyProductId,
+        url: catalogProduct.onlineStoreUrl,
+        avatarSource: catalogProduct.featuredImageUrl,
+        name: catalogProduct.title,
+        handle: catalogProduct.handle,
+        status: catalogProduct.status,
+        price: catalogProduct.minPrice,
+      })),
+    }
+  }
+
   async getManyData(
-    pageType: PageType,
+    pageType: string,
     limit = 20,
     search: string | undefined,
     listIds: string | undefined,
     shop: string,
   ) {
-    if (!Object.values(PageType).includes(pageType as PageType)) {
-      throw new Error(`${pageType} is a valid PageType.`)
+    if (!isPageType(pageType)) {
+      throw new BadRequestException(`Unsupported page type: ${pageType}`)
     }
 
     const pageOption = pageOptions.find((data) => data.pageOptions === pageType)
     if (!pageOption) {
-      throw new Error(`${pageType} is a valid PageType.`)
+      throw new BadRequestException(
+        `Page type ${pageType} is not supported by recommendation placements`,
+      )
     }
     const valuePage = pageOption.value
     const data = await this.prisma.offerProduct.findMany({
@@ -206,6 +305,7 @@ export class RecommenderApiService {
             pageIds: {
               hasSome: [+valuePage],
             },
+            scheduleOn: true,
           },
         },
       },

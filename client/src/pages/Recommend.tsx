@@ -36,9 +36,7 @@ const Recommend = () => {
 
   const rowMarkup = offerData.map(
     ({ id, name, trigger, condition, products }, index) => {
-      const listTitleProduct = products
-        ? products.map((data) => data.name)
-        : []
+      const listTitleProduct = products ? products.map((data) => data.name) : []
 
       return (
         <IndexTable.Row
@@ -47,6 +45,7 @@ const Recommend = () => {
           selected={selectedResources.includes(id.toString())}
           position={index}
         >
+          <IndexTable.Cell>{id}</IndexTable.Cell>
           <IndexTable.Cell>
             <Link
               dataPrimaryLink
@@ -111,6 +110,7 @@ const Recommend = () => {
           }
           onSelectionChange={handleSelectionChange}
           headings={[
+            { title: 'ID', alignment: 'start', id: 'id' },
             {
               title: 'Recommendation name',
               alignment: 'start',

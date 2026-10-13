@@ -5,6 +5,7 @@ import TriggerPages from '@/components/recommend/TriggerPages'
 import TriggerProducts from '@/components/recommend/TriggerProducts'
 import { useRecommendContext } from '@/context/pages/RecommendContext'
 import { Button, FormLayout, Page } from '@shopify/polaris'
+import '@/styles/recommend.css'
 import Products from './product/Products'
 
 const RecommendForm = () => {
@@ -17,7 +18,7 @@ const RecommendForm = () => {
 
   return (
     <Page fullWidth title="Recommendation section">
-      <form onSubmit={submit}>
+      <form className="recommend-form" onSubmit={submit}>
         <FormLayout>
           <Name />
           <TriggerPages />
@@ -32,7 +33,7 @@ const RecommendForm = () => {
           )}
           {slug != 'create' && <Products />}
 
-          <div style={{ textAlign: 'right' }}>
+          <div className="recommend-form-actions">
             <Button size="large" submit variant="primary">
               {slug == 'create' ? 'Create' : 'Update'}
             </Button>

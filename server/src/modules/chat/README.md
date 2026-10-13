@@ -319,10 +319,10 @@ Learned the hard way during implementation.
   terminal state (see section 8).
 - **The Shopify CLI dev proxy breaks CORS preflight.** It answers `OPTIONS`
   itself without `Access-Control-Allow-Origin`. See section 11.
-- **`DevtoolsModule` with a hardcoded port crashes second instances.** Any
-  second Nest process, including orphans from a killed dev session, dies
-  with `EADDRINUSE`. The port is now `DEVTOOLS_PORT` (default 5434) and the
-  module is not registered at all in production.
+- **`DevtoolsModule` can crash a second instance if enabled on the same port.**
+  Devtools is disabled by default; set `DEVTOOLS_ENABLED=true` and choose a
+  unique `DEVTOOLS_PORT` when debugging a specific Nest process. It is never
+  registered in production.
 - **An OpenAI key can be valid but unusable.** Listing models returns 200
   while chat returns `429 insufficient_quota` when there are no credits.
 - **The tunnel URL changes on every `shopify app dev` run.** The merchant

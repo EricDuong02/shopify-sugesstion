@@ -7,8 +7,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
   shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
@@ -28,7 +28,7 @@ model AppSession {
 
 /// Recommender campaign/root config created in the admin recommendation UI. This is not the AI chat catalog.
 model OfferProduct {
-  id              Int              @id @default(autoincrement())
+  id              Int                @id @default(autoincrement())
   shopId          String
   name            String
   placeId         Int
@@ -62,7 +62,7 @@ model OfferProductItem {
 /// Recommender trigger/placement settings: pages where an OfferProduct is active and the trigger product rules.
 model TriggerProduct {
   id             Int             @id @default(autoincrement())
-  pageIds        Int[]
+  pageIds        Int[]            @default([])
   productGroups  ProductGroups[]
   scheduleOn     Boolean
   offerProduct   OfferProduct    @relation(fields: [offerProductId], references: [id])
@@ -120,26 +120,26 @@ model Tokens {
 
 /// Per-shop AI chat configuration: provider/model, public token, prompt, rate limits, fallback and spend cap.
 model ChatShopConfig {
-  id                          Int      @id @default(autoincrement())
-  shopId                      String   @unique
-  enabled                     Boolean  @default(true)
-  llmProvider                 String   @default("openai")
-  llmModel                    String   @default("gpt-4o-mini")
-  llmApiKeyEnc                String?
-  systemPrompt                String?
-  topK                        Int      @default(5)
-  temperature                 Float    @default(0.3)
-  publicToken                 String   @unique
-  rateLimitPerMin             Int      @default(20)
-  fallbackMode                String   @default("free_first_paid_backup")
-  fallbackBudgetCapUsdPerDay  Float    @default(2.0)
-  createdAt                   DateTime @default(now())
-  updatedAt                   DateTime @updatedAt
+  id                         Int      @id @default(autoincrement())
+  shopId                     String   @unique
+  enabled                    Boolean  @default(true)
+  llmProvider                String   @default("openai")
+  llmModel                   String   @default("gpt-4o-mini")
+  llmApiKeyEnc               String?
+  systemPrompt               String?
+  topK                       Int      @default(5)
+  temperature                Float    @default(0.3)
+  publicToken                String   @unique
+  rateLimitPerMin            Int      @default(20)
+  fallbackMode               String   @default("free_first_paid_backup")
+  fallbackBudgetCapUsdPerDay Float    @default(2.0)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 }
 
 /// Shop-scoped Shopify product catalog source of truth for AI chat and future enrichment. Synced from Shopify first sync, resync, and product webhooks.
 model CatalogProduct {
-  id                   Int              @id @default(autoincrement())
+  id                   Int                @id @default(autoincrement())
   shopId               String
   shopifyProductId     String
   title                String
@@ -159,8 +159,8 @@ model CatalogProduct {
   publishedAt          DateTime?
   createdAtShopify     DateTime?
   updatedAtShopify     DateTime?
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
   variants             CatalogVariant[]
   options              CatalogOption[]
   offerItems           OfferProductItem[]
@@ -176,24 +176,24 @@ model CatalogProduct {
 
 /// Shopify variant data for a CatalogProduct. selectedOptions stores custom merchant options like Color, Size, Material without hardcoding fields.
 model CatalogVariant {
-  id               Int            @id @default(autoincrement())
-  shopId           String
-  shopifyVariantId String
-  shopifyProductId String
-  title            String?
-  sku              String?
-  barcode          String?
-  price            Float?
-  compareAtPrice   Float?
-  currencyCode     String?
-  availableForSale Boolean?
+  id                Int            @id @default(autoincrement())
+  shopId            String
+  shopifyVariantId  String
+  shopifyProductId  String
+  title             String?
+  sku               String?
+  barcode           String?
+  price             Float?
+  compareAtPrice    Float?
+  currencyCode      String?
+  availableForSale  Boolean?
   inventoryQuantity Int?
-  selectedOptions  Json
-  imageUrl         String?
-  position         Int?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-  product          CatalogProduct @relation(fields: [shopId, shopifyProductId], references: [shopId, shopifyProductId], onDelete: Cascade)
+  selectedOptions   Json
+  imageUrl          String?
+  position          Int?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  product           CatalogProduct @relation(fields: [shopId, shopifyProductId], references: [shopId, shopifyProductId], onDelete: Cascade)
 
   @@unique([shopId, shopifyVariantId])
   @@index([shopId])
@@ -223,10 +223,10 @@ model CatalogOption {
 
 /// Semantic vector index for AI chat retrieval. Exact product facts live in Catalog* tables; this stores embedding chunks only.
 model ProductEmbedding {
-  id               Int      @id @default(autoincrement())
+  id               Int                         @id @default(autoincrement())
   shopId           String
   shopifyProductId String
-  chunkType        String   @default("product")
+  chunkType        String                      @default("product")
   text             String?
   embedding        Unsupported("vector(768)")?
   contentHash      String
@@ -235,8 +235,8 @@ model ProductEmbedding {
   productUrl       String?
   productImageUrl  String?
   price            Float?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
 
   @@unique([shopId, shopifyProductId, chunkType])
   @@index([shopId])
@@ -244,9 +244,9 @@ model ProductEmbedding {
 
 /// Storefront AI chat conversation session for one shop/customer browser session.
 model ChatSession {
-  id        String   @id @default(cuid())
+  id        String        @id @default(cuid())
   shopId    String
-  startedAt DateTime @default(now())
+  startedAt DateTime      @default(now())
   endedAt   DateTime?
   messages  ChatMessage[]
 
@@ -255,7 +255,7 @@ model ChatSession {
 
 /// Individual chat message and usage telemetry for monitoring, cost estimates, latency and fallback analytics.
 model ChatMessage {
-  id             Int      @id @default(autoincrement())
+  id             Int         @id @default(autoincrement())
   sessionId      String
   session        ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   role           String
@@ -263,9 +263,9 @@ model ChatMessage {
   tokensIn       Int?
   tokensOut      Int?
   latencyMs      Int?
-  fallbackUsed   Boolean  @default(false)
+  fallbackUsed   Boolean     @default(false)
   fallbackReason String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime    @default(now())
 
   @@index([sessionId, createdAt])
 }

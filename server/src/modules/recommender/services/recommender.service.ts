@@ -1,11 +1,15 @@
 import { DATA_PER_PAGE, MAX_QUERY_NUMBER } from '@/const/utils'
+import { PRODUCT_PAGE_ID, TRIGGER_PAGE_IDS } from '@/data'
 import { FetchBrandsResponse, FetchCategoryResponse } from '@/types/Recommend'
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common'
 import { PrismaService } from '@/shared/services/prisma.service'
+import { CatalogSyncService } from '@/modules/catalog/services/catalog-sync.service'
 import { GraphqlClient } from '@shopify/shopify-api'
 import { ListProductService } from '@/modules/recommender-api/services/list-product.service'
 import { CreateProductRecommenderDto } from '../dtos/create-product-recommender.dto'
@@ -36,6 +40,7 @@ export class RecommenderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly listProductService: ListProductService,
+    private readonly catalogSyncService: CatalogSyncService,
   ) {}
 
   async fetchProductsGQL(gqlClient, query) {
@@ -123,7 +128,10 @@ export class RecommenderService {
   ): string | null {
     if (value === null || value === undefined) return null
     const normalized = String(value).trim().split('/').pop()
-    return normalized || null
+    if (!normalized || !/^\d+$/.test(normalized)) {
+      throw new BadRequestException(`Invalid Shopify product ID: ${value}`)
+    }
+    return normalized
   }
 
   private normalizeConditionRules(rules: RecommenderRuleInput[]) {
@@ -138,7 +146,86 @@ export class RecommenderService {
     }))
   }
 
-  private async resolveOfferItems(
+  private normalizePageIds(
+    pageIds: Array<string | number> | null | undefined,
+  ): number[] {
+    if (!Array.isArray(pageIds)) {
+      throw new BadRequestException('Trigger page IDs must be an array')
+    }
+
+    const allowedPageIds = new Set(TRIGGER_PAGE_IDS.map(Number))
+    const normalized = pageIds.map((pageId) => {
+      const value = Number(pageId)
+      if (!Number.isInteger(value) || !allowedPageIds.has(value)) {
+        throw new BadRequestException(`Unsupported trigger page ID: ${pageId}`)
+      }
+      return value
+    })
+
+    return [...new Set(normalized)]
+  }
+
+  private normalizeTriggerGroup(
+    pageIds: number[],
+    group: ProductGroupInput,
+  ): ProductGroupInput {
+    return pageIds.includes(PRODUCT_PAGE_ID)
+      ? group
+      : { ...group, typeId: [], ids: [], rules: [] }
+  }
+
+  private async ensureCatalogProducts(
+    shop: string,
+    ids: string[],
+  ): Promise<Set<string>> {
+    let catalogProducts = await this.prisma.catalogProduct.findMany({
+      where: {
+        shopId: shop,
+        shopifyProductId: { in: ids },
+      },
+      select: { shopifyProductId: true },
+    })
+
+    let catalogIds = new Set(
+      catalogProducts.map((product) => product.shopifyProductId),
+    )
+    const missingCatalogIds = ids.filter((id) => !catalogIds.has(id))
+
+    if (missingCatalogIds.length > 0) {
+      try {
+        await this.catalogSyncService.ensureProductsSynced(
+          shop,
+          missingCatalogIds,
+        )
+      } catch {
+        throw new ServiceUnavailableException(
+          `Catalog sync is unavailable for products: ${missingCatalogIds.join(', ')}`,
+        )
+      }
+
+      catalogProducts = await this.prisma.catalogProduct.findMany({
+        where: {
+          shopId: shop,
+          shopifyProductId: { in: ids },
+        },
+        select: { shopifyProductId: true },
+      })
+      catalogIds = new Set(
+        catalogProducts.map((product) => product.shopifyProductId),
+      )
+    }
+
+    const unresolvedIds = ids.filter((id) => !catalogIds.has(id))
+    if (unresolvedIds.length > 0) {
+      throw new ConflictException(
+        `Catalog sync is incomplete for products: ${unresolvedIds.join(', ')}`,
+      )
+    }
+
+    return catalogIds
+  }
+
+  async resolveOfferItems(
     gqlClient: GraphqlClient,
     shop: string,
     triggerGroup: ProductGroupInput,
@@ -197,22 +284,7 @@ export class RecommenderService {
 
     if (ids.length === 0) return []
 
-    const catalogProducts = await this.prisma.catalogProduct.findMany({
-      where: {
-        shopId: shop,
-        shopifyProductId: { in: ids },
-      },
-      select: { shopifyProductId: true },
-    })
-    const catalogIds = new Set(
-      catalogProducts.map((product) => product.shopifyProductId),
-    )
-    const missingCatalogIds = ids.filter((id) => !catalogIds.has(id))
-    if (missingCatalogIds.length > 0) {
-      throw new ConflictException(
-        `Catalog sync is incomplete for products: ${missingCatalogIds.join(', ')}`,
-      )
-    }
+    const catalogIds = await this.ensureCatalogProducts(shop, ids)
 
     return uniqueCandidates
       .filter(
@@ -232,6 +304,11 @@ export class RecommenderService {
     shop: string,
     dataForm: CreateProductRecommenderDto,
   ) {
+    const pageIds = this.normalizePageIds(dataForm.trigger.pageIds)
+    const triggerProductGroup = this.normalizeTriggerGroup(
+      pageIds,
+      dataForm.productGroups,
+    )
     const fallbackGroup =
       dataForm.fallback.productGroups.ids.length > 0 ||
       dataForm.fallback.productGroups.rules.length > 0
@@ -252,7 +329,7 @@ export class RecommenderService {
           placeId: +dataForm.placeId,
           triggerProduct: {
             create: {
-              pageIds: dataForm.trigger.pageIds.map(Number),
+              pageIds,
               scheduleOn: dataForm.scheduleOn,
               productGroups: {
                 create: {
@@ -284,12 +361,12 @@ export class RecommenderService {
           },
           productGroups: {
             create: {
-              typeId: dataForm.productGroups.typeId,
-              ids: dataForm.productGroups.ids,
-              ...(dataForm.productGroups.rules.length > 0
+              typeId: triggerProductGroup.typeId,
+              ids: triggerProductGroup.ids.map(String),
+              ...(triggerProductGroup.rules.length > 0
                 ? {
                     rules: {
-                      create: dataForm.productGroups.rules.map(
+                      create: triggerProductGroup.rules.map(
                         (data: {
                           column: string
                           relation: string
@@ -363,7 +440,12 @@ export class RecommenderService {
   ) {
     const offer = await this.prisma.offerProduct.findFirst({
       where: { id: +dataForm.id, shopId: shop },
-      select: { id: true },
+      select: {
+        id: true,
+        fallBackProduct: {
+          select: { id: true },
+        },
+      },
     })
     if (!offer) {
       throw new NotFoundException(
@@ -371,6 +453,11 @@ export class RecommenderService {
       )
     }
 
+    const pageIds = this.normalizePageIds(dataForm.trigger.pageIds)
+    const triggerProductGroup = this.normalizeTriggerGroup(
+      pageIds,
+      dataForm.productGroups,
+    )
     const fallbackGroup =
       dataForm.fallback.productGroups.ids.length > 0 ||
       dataForm.fallback.productGroups.rules.length > 0
@@ -413,7 +500,7 @@ export class RecommenderService {
         productGroupsId: +dataForm.productGroups.id,
       },
     })
-    const newRuleIds = dataForm.productGroups.rules.map((rule) => +rule.id)
+    const newRuleIds = triggerProductGroup.rules.map((rule) => +rule.id)
 
     const rulesToDelete = currentProductGroupsRules.filter(
       (rule) => !newRuleIds.includes(rule.id),
@@ -433,7 +520,7 @@ export class RecommenderService {
                 id: +dataForm.trigger.id,
               },
               data: {
-                pageIds: dataForm.trigger.pageIds.map(Number),
+                pageIds,
                 scheduleOn: dataForm.scheduleOn,
                 productGroups: {
                   update: {
@@ -546,17 +633,19 @@ export class RecommenderService {
                   },
                 },
               }
-            : { fallBackProduct: { delete: true } }),
+            : offer.fallBackProduct
+              ? { fallBackProduct: { delete: true } }
+              : {}),
           productGroups: {
             update: {
               where: {
                 id: +dataForm.productGroups.id,
               },
               data: {
-                typeId: dataForm.productGroups.typeId,
-                ids: dataForm.productGroups.ids,
+                typeId: triggerProductGroup.typeId,
+                ids: triggerProductGroup.ids.map(String),
                 rules: {
-                  upsert: dataForm.productGroups.rules.map(
+                  upsert: triggerProductGroup.rules.map(
                     (data: {
                       id: string
                       column: string

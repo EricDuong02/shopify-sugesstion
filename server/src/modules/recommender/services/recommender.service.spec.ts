@@ -1,42 +1,57 @@
+import { PrismaService } from '@/shared/services/prisma.service'
+import { CatalogSyncService } from '@/modules/catalog/services/catalog-sync.service'
+import { ListProductService } from '@/modules/recommender-api/services/list-product.service'
+import { CreateProductRecommenderDto } from '../dtos/create-product-recommender.dto'
+import { GetDetail } from '../dtos/get-detail.dto'
+import { UpdateProductRecommenderDto } from '../dtos/update-product-recommender.dto'
 import { RecommenderService } from './recommender.service'
 
-describe('RecommenderService canonical offer items', () => {
-  const triggerGroup = {
-    typeId: [],
-    ids: ['gid://shopify/Product/101'],
-    rules: [],
-  }
-  const fallbackGroup = {
-    typeId: [],
-    ids: ['103', '104'],
-    rules: [],
-  }
+const createPrisma = (overrides: Record<string, unknown> = {}) =>
+  Object.assign(new PrismaService(), overrides)
 
+const createListProductService = (overrides: Record<string, unknown> = {}) =>
+  Object.assign(new ListProductService(null, null), overrides)
+
+const createCatalogSyncService = (overrides: Record<string, unknown> = {}) =>
+  Object.assign(
+    new CatalogSyncService(null, null, null, null),
+    { ensureProductsSynced: jest.fn().mockResolvedValue(undefined) },
+    overrides,
+  )
+
+const triggerGroup = {
+  typeId: [],
+  ids: ['gid://shopify/Product/101'],
+  rules: [],
+}
+
+const fallbackGroup = {
+  typeId: [],
+  ids: ['103', '104'],
+  rules: [],
+}
+
+describe('RecommenderService canonical offer items', () => {
   it('normalizes GID and numeric IDs and keeps fallback order', async () => {
-    const prisma = {
-      catalogProduct: {
-        findMany: jest
-          .fn()
-          .mockResolvedValue([
-            { shopifyProductId: '101' },
-            { shopifyProductId: '102' },
-            { shopifyProductId: '103' },
-            { shopifyProductId: '104' },
-          ]),
-      },
-    }
-    const listProductService = {
-      getDataByCondition: jest
-        .fn()
-        .mockResolvedValue([{ id: 'gid://shopify/Product/102' }]),
-    }
+    const findMany = jest
+      .fn()
+      .mockResolvedValue([
+        { shopifyProductId: '101' },
+        { shopifyProductId: '102' },
+        { shopifyProductId: '103' },
+        { shopifyProductId: '104' },
+      ])
+    const getDataByCondition = jest
+      .fn()
+      .mockResolvedValue([{ id: 'gid://shopify/Product/102' }])
     const service = new RecommenderService(
-      prisma as any,
-      listProductService as any,
+      createPrisma({ catalogProduct: { findMany } }),
+      createListProductService({ getDataByCondition }),
+      createCatalogSyncService(),
     )
 
-    const result = await (service as any).resolveOfferItems(
-      {},
+    const result = await service.resolveOfferItems(
+      null,
       'shop.example.com',
       {
         ...triggerGroup,
@@ -46,7 +61,7 @@ describe('RecommenderService canonical offer items', () => {
       fallbackGroup,
     )
 
-    expect(prisma.catalogProduct.findMany).toHaveBeenCalledWith({
+    expect(findMany).toHaveBeenCalledWith({
       where: {
         shopId: 'shop.example.com',
         shopifyProductId: { in: ['101', '102', '103', '104'] },
@@ -81,24 +96,93 @@ describe('RecommenderService canonical offer items', () => {
     ])
   })
 
-  it('rejects canonical resolution when catalog sync is incomplete', async () => {
+  it('hydrates missing catalog products before resolving canonical items', async () => {
+    const findMany = jest
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ shopifyProductId: '101' }])
+    const ensureProductsSynced = jest.fn().mockResolvedValue(undefined)
     const service = new RecommenderService(
-      {
-        catalogProduct: {
-          findMany: jest.fn().mockResolvedValue([{ shopifyProductId: '101' }]),
-        },
-      } as any,
-      { getDataByCondition: jest.fn() } as any,
+      createPrisma({ catalogProduct: { findMany } }),
+      createListProductService(),
+      createCatalogSyncService({ ensureProductsSynced }),
     )
 
     await expect(
-      (service as any).resolveOfferItems(
-        {},
-        'shop.example.com',
-        triggerGroup,
-        fallbackGroup,
-      ),
-    ).rejects.toThrow('Catalog sync is incomplete')
+      service.resolveOfferItems(null, 'shop.example.com', triggerGroup),
+    ).resolves.toEqual([
+      {
+        shopId: 'shop.example.com',
+        shopifyProductId: '101',
+        position: 0,
+        source: 'trigger',
+      },
+    ])
+
+    expect(ensureProductsSynced).toHaveBeenCalledWith('shop.example.com', [
+      '101',
+    ])
+    expect(findMany).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns conflict when synced products are absent from Shopify', async () => {
+    const findMany = jest
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+    const service = new RecommenderService(
+      createPrisma({ catalogProduct: { findMany } }),
+      createListProductService(),
+      createCatalogSyncService({
+        ensureProductsSynced: jest.fn().mockResolvedValue(undefined),
+      }),
+    )
+
+    await expect(
+      service.resolveOfferItems(null, 'shop.example.com', triggerGroup),
+    ).rejects.toThrow('Catalog sync is incomplete for products: 101')
+  })
+
+  it('returns service unavailable when catalog hydration fails', async () => {
+    const ensureProductsSynced = jest
+      .fn()
+      .mockRejectedValue(new Error('Shopify unavailable'))
+    const service = new RecommenderService(
+      createPrisma({
+        catalogProduct: { findMany: jest.fn().mockResolvedValue([]) },
+      }),
+      createListProductService(),
+      createCatalogSyncService({ ensureProductsSynced }),
+    )
+
+    await expect(
+      service.resolveOfferItems(null, 'shop.example.com', triggerGroup),
+    ).rejects.toThrow('Catalog sync is unavailable for products: 101')
+  })
+
+  it('rejects invalid trigger page IDs before creating an offer', async () => {
+    const transaction = jest.fn()
+    const service = new RecommenderService(
+      createPrisma({ $transaction: transaction }),
+      createListProductService(),
+      createCatalogSyncService(),
+    )
+    const data: CreateProductRecommenderDto = {
+      name: 'Related products',
+      placeId: 0,
+      productGroups: { typeId: [], ids: [], rules: [] },
+      trigger: {
+        pageIds: ['9'],
+        productGroups: { typeId: [], ids: [], rules: [] },
+      },
+      fallback: { productGroups: { typeId: [], ids: [], rules: [] } },
+      scheduleOn: true,
+    }
+
+    await expect(
+      service.createData(null, 'shop.example.com', data),
+    ).rejects.toThrow('Unsupported trigger page ID: 9')
+    expect(transaction).not.toHaveBeenCalled()
   })
 
   it('writes canonical items during create', async () => {
@@ -110,7 +194,8 @@ describe('RecommenderService canonical offer items', () => {
         createMany: jest.fn(),
       },
     }
-    const prisma = {
+    const transaction = jest.fn(async (callback) => callback(tx))
+    const prisma = createPrisma({
       catalogProduct: {
         findMany: jest
           .fn()
@@ -119,18 +204,16 @@ describe('RecommenderService canonical offer items', () => {
             { shopifyProductId: '999' },
           ]),
       },
-      $transaction: jest.fn(async (callback) => callback(tx)),
-    }
+      $transaction: transaction,
+    })
     const service = new RecommenderService(
-      prisma as any,
-      {
-        getDataByCondition: jest.fn(),
-      } as any,
+      prisma,
+      createListProductService(),
+      createCatalogSyncService(),
     )
-
-    await service.createData({} as any, 'shop.example.com', {
+    const data: CreateProductRecommenderDto = {
       name: 'Related products',
-      placeId: '0',
+      placeId: 0,
       productGroups: {
         typeId: [],
         ids: ['gid://shopify/Product/999'],
@@ -142,7 +225,9 @@ describe('RecommenderService canonical offer items', () => {
       },
       fallback: { productGroups: { typeId: [], ids: [], rules: [] } },
       scheduleOn: true,
-    } as any)
+    }
+
+    await service.createData(null, 'shop.example.com', data)
 
     expect(tx.offerProductItem.createMany).toHaveBeenCalledWith({
       data: [
@@ -160,11 +245,14 @@ describe('RecommenderService canonical offer items', () => {
   it('filters admin items by the requested shop', async () => {
     const findMany = jest.fn().mockResolvedValue([])
     const service = new RecommenderService(
-      { offerProduct: { findMany } } as any,
-      {} as any,
+      createPrisma({ offerProduct: { findMany } }),
+      createListProductService(),
+      createCatalogSyncService(),
     )
 
-    await service.getData('shop-a.myshopify.com', { id: '7' } as any)
+    await service.getData('shop-a.myshopify.com', {
+      id: '7',
+    } satisfies GetDetail)
 
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -188,9 +276,12 @@ describe('RecommenderService canonical offer items', () => {
         createMany: jest.fn(),
       },
     }
-    const prisma = {
+    const transaction = jest.fn(async (callback) => callback(tx))
+    const prisma = createPrisma({
       offerProduct: {
-        findFirst: jest.fn().mockResolvedValue({ id: 7 }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ id: 7, fallBackProduct: null }),
       },
       rules: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -198,19 +289,17 @@ describe('RecommenderService canonical offer items', () => {
       catalogProduct: {
         findMany: jest.fn().mockResolvedValue([]),
       },
-      $transaction: jest.fn(async (callback) => callback(tx)),
-    }
+      $transaction: transaction,
+    })
     const service = new RecommenderService(
-      prisma as any,
-      {
-        getDataByCondition: jest.fn(),
-      } as any,
+      prisma,
+      createListProductService(),
+      createCatalogSyncService(),
     )
-
-    await service.updateData({} as any, 'shop.example.com', {
+    const data: UpdateProductRecommenderDto = {
       id: '7',
       name: 'Related products',
-      placeId: '0',
+      placeId: 0,
       productGroups: { id: '10', typeId: [], ids: [], rules: [] },
       trigger: {
         id: '8',
@@ -222,8 +311,17 @@ describe('RecommenderService canonical offer items', () => {
         productGroups: { id: '', typeId: [], ids: [], rules: [] },
       },
       scheduleOn: true,
-    } as any)
+    }
 
+    await service.updateData(null, 'shop.example.com', data)
+
+    expect(tx.offerProduct.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.not.objectContaining({
+          fallBackProduct: expect.anything(),
+        }),
+      }),
+    )
     expect(tx.offerProductItem.deleteMany).toHaveBeenCalledWith({
       where: { offerProductId: 7, shopId: 'shop.example.com' },
     })
@@ -231,21 +329,40 @@ describe('RecommenderService canonical offer items', () => {
   })
 
   it('rejects updates for an offer owned by another shop', async () => {
-    const prisma = {
-      offerProduct: {
-        findFirst: jest.fn().mockResolvedValue(null),
+    const findFirst = jest.fn().mockResolvedValue(null)
+    const service = new RecommenderService(
+      createPrisma({ offerProduct: { findFirst } }),
+      createListProductService(),
+      createCatalogSyncService(),
+    )
+    const data: UpdateProductRecommenderDto = {
+      id: '7',
+      name: 'Related products',
+      placeId: 0,
+      productGroups: { id: '10', typeId: [], ids: [], rules: [] },
+      trigger: {
+        id: '8',
+        pageIds: [],
+        productGroups: { id: '9', typeId: [], ids: [], rules: [] },
       },
+      fallback: {
+        id: '',
+        productGroups: { id: '', typeId: [], ids: [], rules: [] },
+      },
+      scheduleOn: true,
     }
-    const service = new RecommenderService(prisma as any, {} as any)
 
     await expect(
-      service.updateData({} as any, 'other-shop.example.com', {
-        id: '7',
-      } as any),
+      service.updateData(null, 'other-shop.example.com', data),
     ).rejects.toThrow('OfferProduct with id 7 not found')
-    expect(prisma.offerProduct.findFirst).toHaveBeenCalledWith({
+    expect(findFirst).toHaveBeenCalledWith({
       where: { id: 7, shopId: 'other-shop.example.com' },
-      select: { id: true },
+      select: {
+        id: true,
+        fallBackProduct: {
+          select: { id: true },
+        },
+      },
     })
   })
 })

@@ -6,15 +6,8 @@ const recommendContext = createContext<ReturnType<typeof useRecommend> | null>(
   null
 )
 
-export const RecommendContext = ({
-  children,
-  props,
-}: {
-  children: ReactNode
-  //TODO props and type will be add when have  data api
-  props: any
-}) => {
-  const hook = useRecommend(props)
+export const RecommendContext = ({ children }: { children: ReactNode }) => {
+  const hook = useRecommend()
 
   return (
     <recommendContext.Provider value={hook}>

@@ -3,7 +3,7 @@ import { RecommendContext } from '@/context/pages/RecommendContext'
 
 const MyForm = () => {
   return (
-    <RecommendContext props={undefined}>
+    <RecommendContext>
       <RecommendForm />
     </RecommendContext>
   )

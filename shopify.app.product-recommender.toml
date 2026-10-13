@@ -58,5 +58,10 @@ description = "An example metaobject definition created by this template"
   name = "Description"
   type = "multi_line_text_field"
 
+[app_proxy]
+url = "https://example.com/api/v1/recommender-api/theme"
+prefix = "apps"
+subpath = "recommendations"
+
 [build]
 automatically_update_urls_on_dev = true

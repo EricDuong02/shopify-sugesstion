@@ -4,7 +4,7 @@ import {
   PRODUCT_RECOMMENDER_UPDATE,
   RECOMMEND,
 } from '@/const'
-import { listAttribute, listModule, pageOptions } from '@/data'
+import { listAttribute, listModule, pageOptions, PRODUCT_PAGE_ID } from '@/data'
 import { useApi } from '@/hooks/useApi'
 import { GetDataResult, RecommendedProduct, Rule } from '@/types/recommended'
 import { useToast } from '@shopify/app-bridge-react'
@@ -20,9 +20,17 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 
-//TODO props and type will be add when have  data api
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const useRecommend = (props: any) => {
+const toCreateRule = ({
+  column,
+  relation,
+  value,
+}: Rule): Pick<Rule, 'column' | 'relation' | 'value'> => ({
+  column,
+  relation,
+  value,
+})
+
+const useRecommend = () => {
   const api = useApi()
   const { slug } = useParams()
   const navigate = useNavigate()
@@ -79,7 +87,7 @@ const useRecommend = (props: any) => {
     relation:
       listAttribute.find((data) => data.value == listAttribute[0].value)
         ?.conditions[0] || '',
-    value: [] as string[],
+    value: [],
   }
 
   const productRules = useDynamicList<Rule>(
@@ -149,7 +157,7 @@ const useRecommend = (props: any) => {
         relation:
           listAttribute.find((data) => data.value == listAttribute[0].value)
             ?.conditions[0] || '',
-        value: [] as string[],
+        value: [],
       }
     }
   )
@@ -171,7 +179,7 @@ const useRecommend = (props: any) => {
         relation:
           listAttribute.find((data) => data.value == listAttribute[0].value)
             ?.conditions[0] || '',
-        value: [] as string[],
+        value: [],
       }
     }
   )
@@ -290,7 +298,7 @@ const useRecommend = (props: any) => {
             // Have value when click option product pages in trigger pages
             productGroups: {
               typeId: fieldValues.productGroups.typeId.value,
-              rules: fieldValues.productRules,
+              rules: fieldValues.productRules.map(toCreateRule),
               ids: fieldValues.productGroups.ids.value,
             },
             trigger: {
@@ -302,18 +310,17 @@ const useRecommend = (props: any) => {
                 rules: [
                   ...fieldValues.triggerRules,
                   ...fieldValues.autoRecommend,
-                ],
+                ].map(toCreateRule),
                 ids: fieldValues.trigger.productGroups.value.ids.value,
               },
             },
             fallback: {
               productGroups: {
-                id: fieldValues.fallback.productGroups.value.id.value,
                 typeId: fieldValues.fallback.productGroups.value.typeId.value,
                 rules: [
                   ...fieldValues.fallbackRules,
                   ...fieldValues.fallbackAutoRecommend,
-                ],
+                ].map(toCreateRule),
                 ids: fieldValues.fallback.productGroups.value.ids.value,
               },
             },
@@ -393,6 +400,12 @@ const useRecommend = (props: any) => {
 
   const handleChoiceListChange = (selected: string[]) => {
     triggerPagesField.onChange(selected)
+
+    if (!selected.includes(PRODUCT_PAGE_ID)) {
+      hookForm.fields.productGroups.value.typeId.onChange([])
+      hookForm.fields.productGroups.value.ids.onChange([])
+      productRules.reset()
+    }
   }
 
   const handleTriggerProduct = (selected: string[]) => {

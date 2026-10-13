@@ -168,6 +168,8 @@ export const pageOptions = [
   { value: '4', label: 'Product pages' },
 ]
 
+export const PRODUCT_PAGE_ID = '4'
+
 export const typeProduct = [
   { value: '1', label: 'Any products' },
   // { value: '2', label: 'Specific products' },

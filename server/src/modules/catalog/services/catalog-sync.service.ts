@@ -2,7 +2,7 @@ import { InjectQueue } from '@nestjs/bullmq'
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '@/shared/services/prisma.service'
 import { Prisma } from '@prisma/client'
-import { Session } from '@shopify/shopify-api'
+import { GraphqlClient, Session } from '@shopify/shopify-api'
 import { createHash } from 'crypto'
 import { Queue } from 'bullmq'
 import { ShopifyService } from '@/shared/services/shopify.service'
@@ -135,6 +135,54 @@ interface ProductSnapshot {
   price: number | null
 }
 
+interface ProductPageConnection {
+  nodes: Array<{ id: string }>
+  pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null
+}
+
+interface ProductPageResponse {
+  data?: { products?: ProductPageConnection | null }
+}
+
+interface VariantPageResponse {
+  data?: {
+    product?: {
+      variants?: {
+        nodes?: ShopifyVariantNode[]
+        pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null
+      } | null
+    } | null
+  }
+}
+
+interface ProductResponse {
+  data?: { product?: ShopifyProductNode | null }
+}
+
+interface OfflineSessionPayload {
+  isOnline?: boolean
+  accessToken?: string
+  scope?: string
+  state?: string
+  expires?: string | Date
+}
+
+const MAX_HYDRATION_IDS = 50
+const HYDRATION_CONCURRENCY = 4
+const HYDRATION_DEADLINE_MS = 15_000
+
+function isOfflineSessionPayload(
+  value: unknown,
+): value is OfflineSessionPayload {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const payload = Object.fromEntries(Object.entries(value))
+  return (
+    payload.isOnline === false &&
+    typeof payload.accessToken === 'string' &&
+    payload.accessToken.length > 0
+  )
+}
+
 function toGid(id: string | number): string {
   const s = String(id)
   return s.startsWith('gid://') ? s : `gid://shopify/Product/${s}`
@@ -142,7 +190,11 @@ function toGid(id: string | number): string {
 
 function toNumericId(gid: string | number): string {
   const parts = String(gid).split('/')
-  return parts[parts.length - 1]
+  const id = parts[parts.length - 1].trim()
+  if (!/^\d+$/.test(id)) {
+    throw new Error(`Invalid Shopify product ID: ${gid}`)
+  }
+  return id
 }
 
 function sha256(text: string): string {
@@ -247,11 +299,59 @@ export class CatalogSyncService {
     )
   }
 
+  /** Synchronize selected products into structured catalog tables before persistence. */
+  async ensureProductsSynced(
+    shop: string,
+    productIds: Array<string | number>,
+  ): Promise<void> {
+    const ids = [
+      ...new Set(productIds.map((productId) => toNumericId(productId))),
+    ]
+    const deadline = Date.now() + HYDRATION_DEADLINE_MS
+
+    if (ids.length > MAX_HYDRATION_IDS) {
+      throw new Error(
+        `Too many products to synchronize in one request: ${ids.length}`,
+      )
+    }
+
+    for (let index = 0; index < ids.length; index += HYDRATION_CONCURRENCY) {
+      if (Date.now() >= deadline) {
+        throw new Error('Catalog sync deadline exceeded')
+      }
+
+      const batch = ids.slice(index, index + HYDRATION_CONCURRENCY)
+      const remainingMs = deadline - Date.now()
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          Promise.all(
+            batch.map((productId) =>
+              this.syncProduct(shop, productId, { refreshEmbedding: false }),
+            ),
+          ),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error('Catalog sync deadline exceeded')),
+              remainingMs,
+            )
+          }),
+        ])
+      } finally {
+        if (timeout) clearTimeout(timeout)
+      }
+    }
+  }
+
   /**
    * Sync one product: fetch from Shopify, upsert structured catalog rows, then
    * refresh the semantic embedding when the embedding document changes.
    */
-  async syncProduct(shop: string, productId: string | number): Promise<void> {
+  async syncProduct(
+    shop: string,
+    productId: string | number,
+    options: { refreshEmbedding?: boolean } = {},
+  ): Promise<void> {
     const numericId = toNumericId(productId)
     const gid = toGid(numericId)
     const client = await this.getGqlClient(shop)
@@ -270,6 +370,8 @@ export class CatalogSyncService {
     const contentHash = sha256(text)
 
     await this.upsertStructuredCatalog(shop, numericId, product)
+
+    if (options.refreshEmbedding === false) return
 
     const existing = await this.prisma.productEmbedding.findUnique({
       where: {
@@ -348,15 +450,15 @@ export class CatalogSyncService {
     let cursor: string | null = null
 
     for (;;) {
-      const response: any = await client.query({
+      const response = await client.query<ProductPageResponse>({
         data: { query: PRODUCTS_PAGE_QUERY, variables: { cursor } },
       })
-      const connection = response?.body?.data?.products
+      const connection = response.body.data?.products
       if (!connection) {
         throw new Error('Unexpected products response from Shopify')
       }
 
-      for (const node of connection.nodes as { id: string }[]) {
+      for (const node of connection.nodes) {
         await this.enqueueProductSync(shop, toNumericId(node.id))
       }
 
@@ -365,7 +467,7 @@ export class CatalogSyncService {
     }
   }
 
-  private async getGqlClient(shop: string): Promise<any> {
+  private async getGqlClient(shop: string): Promise<GraphqlClient> {
     const session = await this.getOfflineSession(shop)
     if (!session) throw new Error(`No offline session found for shop ${shop}`)
     return this.shopifyService.getGQLClient(session)
@@ -377,13 +479,12 @@ export class CatalogSyncService {
    */
   private async getOfflineSession(shop: string): Promise<Session | null> {
     const records = await this.prisma.appSession.findMany({ where: { shop } })
-    const offline = records.find((r) => {
-      const payload = r.payload as any
-      return payload && payload.isOnline === false && payload.accessToken
-    })
-    if (!offline) return null
+    const offline = records.find((record) =>
+      isOfflineSessionPayload(record.payload),
+    )
+    if (!offline || !isOfflineSessionPayload(offline.payload)) return null
 
-    const payload = offline.payload as any
+    const payload = offline.payload
     return new Session({
       id: offline.id,
       shop,
@@ -396,17 +497,17 @@ export class CatalogSyncService {
   }
 
   private async fetchProduct(
-    client: any,
+    client: GraphqlClient,
     gid: string,
   ): Promise<ShopifyProductNode | null> {
-    const response: any = await client.query({
+    const response = await client.query<ProductResponse>({
       data: { query: PRODUCT_QUERY, variables: { id: gid } },
     })
-    return response?.body?.data?.product ?? null
+    return response.body.data?.product ?? null
   }
 
   private async fetchRemainingVariants(
-    client: any,
+    client: GraphqlClient,
     gid: string,
     product: ShopifyProductNode,
   ): Promise<void> {
@@ -414,10 +515,10 @@ export class CatalogSyncService {
     let hasNextPage = Boolean(product.variants?.pageInfo?.hasNextPage)
 
     while (hasNextPage) {
-      const response: any = await client.query({
+      const response = await client.query<VariantPageResponse>({
         data: { query: VARIANTS_PAGE_QUERY, variables: { id: gid, cursor } },
       })
-      const connection = response?.body?.data?.product?.variants
+      const connection = response.body.data?.product?.variants
       if (!connection) break
 
       product.variants.nodes.push(...(connection.nodes ?? []))

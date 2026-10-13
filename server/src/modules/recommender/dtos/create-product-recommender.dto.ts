@@ -1,5 +1,13 @@
 import { Type } from 'class-transformer'
-import { IsArray, IsNumber, IsString, ValidateNested } from 'class-validator'
+import { TRIGGER_PAGE_IDS } from '@/data'
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsString,
+  ValidateNested,
+} from 'class-validator'
 
 class RuleDto {
   @IsString()
@@ -15,9 +23,11 @@ class RuleDto {
 
 class ProductGroupsDto {
   @IsArray()
+  @IsString({ each: true })
   ids: string[]
 
-  @IsNumber()
+  @IsArray()
+  @IsString({ each: true })
   typeId: string[]
 
   @IsArray()
@@ -28,6 +38,8 @@ class ProductGroupsDto {
 
 class TriggerDto {
   @IsArray()
+  @IsString({ each: true })
+  @IsIn(TRIGGER_PAGE_IDS, { each: true })
   pageIds: string[]
 
   @ValidateNested()
@@ -45,8 +57,8 @@ export class CreateProductRecommenderDto {
   @IsString()
   name: string
 
-  @IsNumber()
-  placeId: string
+  @IsInt()
+  placeId: number
 
   @ValidateNested()
   @Type(() => ProductGroupsDto)
@@ -60,6 +72,6 @@ export class CreateProductRecommenderDto {
   @Type(() => Fallback)
   fallback: Fallback
 
-  @IsString()
+  @IsBoolean()
   scheduleOn: boolean
 }

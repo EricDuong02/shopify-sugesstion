@@ -1,6 +1,13 @@
 import { ShopClient } from '@/decorators/shop-client.decorator'
 import { ShopSession } from '@/decorators/shop-session.decorator'
-import { Body, Controller, Get, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  ValidationPipe,
+} from '@nestjs/common'
 import { RecommenderService } from '../services/recommender.service'
 import { listAttribute, listConditions, pageOptions } from '@/data'
 import { FetchProductsQueryDto } from 'src/modules/recommender/dtos/fetch-products-query.dto'
@@ -76,7 +83,14 @@ export class RecommenderController {
   async submitData(
     @ShopClient('gql') gqlClient: GraphqlClient,
     @ShopSession() session,
-    @Body() body: CreateProductRecommenderDto,
+    @Body(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      }),
+    )
+    body: CreateProductRecommenderDto,
   ) {
     const data = await this.recommenderService.createData(
       gqlClient,
@@ -90,7 +104,14 @@ export class RecommenderController {
   async updateData(
     @ShopClient('gql') gqlClient: GraphqlClient,
     @ShopSession() session,
-    @Body() body: UpdateProductRecommenderDto,
+    @Body(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      }),
+    )
+    body: UpdateProductRecommenderDto,
   ) {
     const data = await this.recommenderService.updateData(
       gqlClient,

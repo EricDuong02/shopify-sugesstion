@@ -170,6 +170,11 @@ export const pageOptions = [
   { value: '4', label: 'Product pages', pageOptions: PageType.product },
 ]
 
+export const TRIGGER_PAGE_IDS = pageOptions.map(({ value }) => value)
+export const PRODUCT_PAGE_ID = Number(
+  pageOptions.find(({ pageOptions: page }) => page === PageType.product)?.value,
+)
+
 export const typeProduct = [
   { value: '1', label: 'Any products' },
   { value: '2', label: 'Specific products' },

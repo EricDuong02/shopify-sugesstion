@@ -1,7 +1,8 @@
 import { ShopifyServer, ShopifyShop } from '@/decorators/shop-server.decorator'
-import { Controller, Get, Query } from '@nestjs/common'
+import { Controller, Get, Header, Query, ValidationPipe } from '@nestjs/common'
 import { GraphqlClient } from '@shopify/shopify-api'
 import { RecommendDto, RecommendListDto } from '../dtos/recommends.dto'
+import { ThemeRecommendationDto } from '../dtos/theme-recommendation.dto'
 import { RecommenderApiService } from '../services/recommender-api.service'
 
 @Controller({
@@ -50,6 +51,22 @@ export class RecommenderApiController {
     )
 
     return dataOfferProduct.products
+  }
+
+  @Get('theme')
+  @Header('Cache-Control', 'private, no-store')
+  async fetchThemeRecommendation(
+    @ShopifyShop() shop: string,
+    @Query(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      }),
+    )
+    query: ThemeRecommendationDto,
+  ) {
+    return this.recommenderApiService.getThemeData(query, shop)
   }
 
   @Get('recommends/list')

@@ -14,7 +14,6 @@ async function bootstrap(server?: Express): Promise<NestExpressApplication> {
   )
   app.setGlobalPrefix('api')
   app.enableCors()
-
   app.enableVersioning({
     type: VersioningType.URI,
   })
