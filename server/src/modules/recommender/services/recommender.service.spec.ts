@@ -5,6 +5,18 @@ import { CreateProductRecommenderDto } from '../dtos/create-product-recommender.
 import { GetDetail } from '../dtos/get-detail.dto'
 import { UpdateProductRecommenderDto } from '../dtos/update-product-recommender.dto'
 import { RecommenderService } from './recommender.service'
+import {
+  RecommendationCacheService,
+  RecommendationRedisClient,
+} from '@/modules/recommendation-cache/services/recommendation-cache.service'
+
+const createRedis = (): RecommendationRedisClient => ({
+  get: jest.fn().mockResolvedValue(null),
+  increment: jest.fn().mockResolvedValue(1),
+  setEx: jest.fn().mockResolvedValue('OK'),
+  setLock: jest.fn().mockResolvedValue('OK'),
+  releaseLock: jest.fn().mockResolvedValue(undefined),
+})
 
 const createPrisma = (overrides: Record<string, unknown> = {}) =>
   Object.assign(new PrismaService(), overrides)
@@ -14,10 +26,17 @@ const createListProductService = (overrides: Record<string, unknown> = {}) =>
 
 const createCatalogSyncService = (overrides: Record<string, unknown> = {}) =>
   Object.assign(
-    new CatalogSyncService(null, null, null, null),
+    new CatalogSyncService(null, null, null, null, null),
     { ensureProductsSynced: jest.fn().mockResolvedValue(undefined) },
     overrides,
   )
+
+const createRecommendationCache = (
+  invalidateCampaign = jest.fn().mockResolvedValue(undefined),
+) =>
+  Object.assign(new RecommendationCacheService(createRedis()), {
+    invalidateCampaign,
+  })
 
 const triggerGroup = {
   typeId: [],
@@ -48,6 +67,7 @@ describe('RecommenderService canonical offer items', () => {
       createPrisma({ catalogProduct: { findMany } }),
       createListProductService({ getDataByCondition }),
       createCatalogSyncService(),
+      createRecommendationCache(),
     )
 
     const result = await service.resolveOfferItems(
@@ -106,6 +126,7 @@ describe('RecommenderService canonical offer items', () => {
       createPrisma({ catalogProduct: { findMany } }),
       createListProductService(),
       createCatalogSyncService({ ensureProductsSynced }),
+      createRecommendationCache(),
     )
 
     await expect(
@@ -136,6 +157,7 @@ describe('RecommenderService canonical offer items', () => {
       createCatalogSyncService({
         ensureProductsSynced: jest.fn().mockResolvedValue(undefined),
       }),
+      createRecommendationCache(),
     )
 
     await expect(
@@ -153,6 +175,7 @@ describe('RecommenderService canonical offer items', () => {
       }),
       createListProductService(),
       createCatalogSyncService({ ensureProductsSynced }),
+      createRecommendationCache(),
     )
 
     await expect(
@@ -166,6 +189,7 @@ describe('RecommenderService canonical offer items', () => {
       createPrisma({ $transaction: transaction }),
       createListProductService(),
       createCatalogSyncService(),
+      createRecommendationCache(),
     )
     const data: CreateProductRecommenderDto = {
       name: 'Related products',
@@ -206,10 +230,12 @@ describe('RecommenderService canonical offer items', () => {
       },
       $transaction: transaction,
     })
+    const invalidateCampaign = jest.fn().mockResolvedValue(undefined)
     const service = new RecommenderService(
       prisma,
       createListProductService(),
       createCatalogSyncService(),
+      createRecommendationCache(invalidateCampaign),
     )
     const data: CreateProductRecommenderDto = {
       name: 'Related products',
@@ -240,6 +266,7 @@ describe('RecommenderService canonical offer items', () => {
         },
       ],
     })
+    expect(invalidateCampaign).toHaveBeenCalledWith('shop.example.com', 7)
   })
 
   it('filters admin items by the requested shop', async () => {
@@ -248,6 +275,7 @@ describe('RecommenderService canonical offer items', () => {
       createPrisma({ offerProduct: { findMany } }),
       createListProductService(),
       createCatalogSyncService(),
+      createRecommendationCache(),
     )
 
     await service.getData('shop-a.myshopify.com', {
@@ -291,10 +319,12 @@ describe('RecommenderService canonical offer items', () => {
       },
       $transaction: transaction,
     })
+    const invalidateCampaign = jest.fn().mockResolvedValue(undefined)
     const service = new RecommenderService(
       prisma,
       createListProductService(),
       createCatalogSyncService(),
+      createRecommendationCache(invalidateCampaign),
     )
     const data: UpdateProductRecommenderDto = {
       id: '7',
@@ -326,6 +356,7 @@ describe('RecommenderService canonical offer items', () => {
       where: { offerProductId: 7, shopId: 'shop.example.com' },
     })
     expect(tx.offerProductItem.createMany).not.toHaveBeenCalled()
+    expect(invalidateCampaign).toHaveBeenCalledWith('shop.example.com', 7)
   })
 
   it('rejects updates for an offer owned by another shop', async () => {
@@ -334,6 +365,7 @@ describe('RecommenderService canonical offer items', () => {
       createPrisma({ offerProduct: { findFirst } }),
       createListProductService(),
       createCatalogSyncService(),
+      createRecommendationCache(),
     )
     const data: UpdateProductRecommenderDto = {
       id: '7',

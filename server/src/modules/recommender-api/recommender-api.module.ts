@@ -4,9 +4,11 @@ import { RecommenderApiService } from './services/recommender-api.service'
 import { ListProductService } from './services/list-product.service'
 import { ProductCount } from './services/product-count.service'
 import { RecommenderApiService as RecommenderShopifyQlService } from './services/recommender-shopifyql.service'
+import { RecommendationCacheModule } from '../recommendation-cache/recommendation-cache.module'
 
 @Module({
   controllers: [RecommenderApiController],
+  imports: [RecommendationCacheModule],
   providers: [
     RecommenderApiService,
     ListProductService,

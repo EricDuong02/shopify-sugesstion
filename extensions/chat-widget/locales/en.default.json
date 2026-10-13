@@ -5,5 +5,10 @@
     "open_chat": "Open chat",
     "close_chat": "Close chat",
     "send_message": "Send message"
+  },
+  "recommendation_widget": {
+    "empty": "No recommendations available",
+    "previous": "Previous products",
+    "next": "Next products"
   }
 }

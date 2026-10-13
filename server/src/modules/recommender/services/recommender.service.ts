@@ -12,6 +12,7 @@ import { PrismaService } from '@/shared/services/prisma.service'
 import { CatalogSyncService } from '@/modules/catalog/services/catalog-sync.service'
 import { GraphqlClient } from '@shopify/shopify-api'
 import { ListProductService } from '@/modules/recommender-api/services/list-product.service'
+import { RecommendationCacheService } from '@/modules/recommendation-cache/services/recommendation-cache.service'
 import { CreateProductRecommenderDto } from '../dtos/create-product-recommender.dto'
 import { GetDetail } from '../dtos/get-detail.dto'
 import { RecommendDto } from '../dtos/recommends.dto'
@@ -41,6 +42,7 @@ export class RecommenderService {
     private readonly prisma: PrismaService,
     private readonly listProductService: ListProductService,
     private readonly catalogSyncService: CatalogSyncService,
+    private readonly recommendationCache: RecommendationCacheService,
   ) {}
 
   async fetchProductsGQL(gqlClient, query) {
@@ -321,7 +323,7 @@ export class RecommenderService {
       fallbackGroup,
     )
 
-    return await this.prisma.$transaction(async (tx) => {
+    const createdOffer = await this.prisma.$transaction(async (tx) => {
       const createOffer = await tx.offerProduct.create({
         data: {
           shopId: shop,
@@ -431,6 +433,9 @@ export class RecommenderService {
 
       return createOffer
     })
+
+    await this.recommendationCache.invalidateCampaign(shop, createdOffer.id)
+    return createdOffer
   }
 
   async updateData(
@@ -506,7 +511,7 @@ export class RecommenderService {
       (rule) => !newRuleIds.includes(rule.id),
     )
 
-    return await this.prisma.$transaction(async (tx) => {
+    const updatedOffer = await this.prisma.$transaction(async (tx) => {
       const updateData = await tx.offerProduct.update({
         where: {
           id: +dataForm.id,
@@ -717,6 +722,9 @@ export class RecommenderService {
 
       return updateData
     })
+
+    await this.recommendationCache.invalidateCampaign(shop, updatedOffer.id)
+    return updatedOffer
   }
 
   async getData(shop: string, query: GetDetail) {

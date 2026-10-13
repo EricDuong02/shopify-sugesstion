@@ -1,8 +1,9 @@
 {% comment %}
-  Recommendation campaign app block. Campaigns are selected by ID from the
-  embedded admin because app block schemas cannot load dynamic app data.
+  Recommendation app block. Campaigns are discovered from active Trigger pages
+  for the current storefront page because theme app schemas cannot load dynamic app data.
 {% endcomment %}
 
+{{ 'swiper-bundle.min.css' | asset_url | stylesheet_tag }}
 {{ 'recommendation.css' | asset_url | stylesheet_tag }}
 
 <div
@@ -12,6 +13,10 @@
   data-heading="{{ block.settings.heading | strip | escape }}"
   data-limit="{{ block.settings.product_limit }}"
   data-columns="{{ block.settings.columns }}"
+  data-mobile-columns="{{ block.settings.mobile_columns }}"
+  data-previous-label="{{ 'recommendation_widget.previous' | t | escape }}"
+  data-next-label="{{ 'recommendation_widget.next' | t | escape }}"
+  data-loading-text="{{ block.settings.loading_text | strip | escape }}"
   {{ block.shopify_attributes }}
 >
   <div class="recommendation-widget__loading" role="status">
@@ -19,18 +24,19 @@
   </div>
 </div>
 
+<script src="{{ 'swiper-bundle.min.js' | asset_url }}" defer></script>
 <script src="{{ 'recommendation.js' | asset_url }}" defer></script>
 
 {% schema %}
 {
-  "name": "Recommendation campaign",
+  "name": "Recommendation campaigns",
   "target": "section",
   "settings": [
     {
       "type": "text",
       "id": "campaign_id",
-      "label": "Campaign ID",
-      "info": "Copy the ID from the Recommendation admin page."
+      "label": "Campaign ID (optional)",
+      "info": "Leave blank to show active campaigns configured for this page in Recommendation admin. Enter an ID only to pin one campaign."
     },
     {
       "type": "text",
@@ -41,7 +47,8 @@
     {
       "type": "range",
       "id": "product_limit",
-      "label": "Products to show",
+      "label": "Products to load",
+      "info": "The total number of products available to browse.",
       "min": 1,
       "max": 50,
       "step": 1,
@@ -50,11 +57,22 @@
     {
       "type": "range",
       "id": "columns",
-      "label": "Columns",
+      "label": "Desktop products visible",
+      "info": "Number of product cards visible horizontally on desktop.",
       "min": 1,
       "max": 6,
       "step": 1,
       "default": 4
+    },
+    {
+      "type": "range",
+      "id": "mobile_columns",
+      "label": "Mobile products visible",
+      "info": "Number of product cards visible horizontally on mobile.",
+      "min": 1,
+      "max": 3,
+      "step": 1,
+      "default": 1
     },
     {
       "type": "text",

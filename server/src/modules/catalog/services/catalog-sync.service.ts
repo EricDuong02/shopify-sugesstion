@@ -7,6 +7,7 @@ import { createHash } from 'crypto'
 import { Queue } from 'bullmq'
 import { ShopifyService } from '@/shared/services/shopify.service'
 import { LlmRegistryService } from '../../chat/llm/llm-registry.service'
+import { RecommendationCacheService } from '../../recommendation-cache/services/recommendation-cache.service'
 
 export const CATALOG_SYNC_QUEUE = 'catalog-sync'
 
@@ -227,6 +228,7 @@ export class CatalogSyncService {
     private readonly shopifyService: ShopifyService,
     private readonly llmRegistry: LlmRegistryService,
     @InjectQueue(CATALOG_SYNC_QUEUE) private readonly queue: Queue,
+    private readonly recommendationCache: RecommendationCacheService,
   ) {}
 
   /** Enqueue a single product (re)sync. Deduplicated by jobId. */
@@ -369,7 +371,12 @@ export class CatalogSyncService {
     const { text, snapshot } = this.buildDocument(shop, product)
     const contentHash = sha256(text)
 
-    await this.upsertStructuredCatalog(shop, numericId, product)
+    const offerProductIds = await this.upsertStructuredCatalog(
+      shop,
+      numericId,
+      product,
+    )
+    await this.invalidateCampaigns(shop, offerProductIds)
 
     if (options.refreshEmbedding === false) return
 
@@ -428,20 +435,29 @@ export class CatalogSyncService {
   /** Remove one product from the structured catalog and embedding index. */
   async deleteProduct(shop: string, productId: string | number): Promise<void> {
     const numericId = toNumericId(productId)
-    await this.prisma.$transaction([
-      this.prisma.productEmbedding.deleteMany({
+    const offerProductIds = await this.prisma.$transaction(async (tx) => {
+      const offerItems = await tx.offerProductItem.findMany({
         where: { shopId: shop, shopifyProductId: numericId },
-      }),
-      this.prisma.catalogVariant.deleteMany({
+        select: { offerProductId: true },
+      })
+
+      await tx.productEmbedding.deleteMany({
         where: { shopId: shop, shopifyProductId: numericId },
-      }),
-      this.prisma.catalogOption.deleteMany({
+      })
+      await tx.catalogVariant.deleteMany({
         where: { shopId: shop, shopifyProductId: numericId },
-      }),
-      this.prisma.catalogProduct.deleteMany({
+      })
+      await tx.catalogOption.deleteMany({
         where: { shopId: shop, shopifyProductId: numericId },
-      }),
-    ])
+      })
+      await tx.catalogProduct.deleteMany({
+        where: { shopId: shop, shopifyProductId: numericId },
+      })
+
+      return [...new Set(offerItems.map((item) => item.offerProductId))]
+    })
+
+    await this.invalidateCampaigns(shop, offerProductIds)
   }
 
   /** Page through the whole catalog and enqueue one sync job per product. */
@@ -531,7 +547,7 @@ export class CatalogSyncService {
     shop: string,
     numericId: string,
     product: ShopifyProductNode,
-  ): Promise<void> {
+  ): Promise<number[]> {
     const minPrice = parseFloatOrNull(
       product.priceRangeV2?.minVariantPrice?.amount,
     )
@@ -543,7 +559,12 @@ export class CatalogSyncService {
       product.priceRangeV2?.maxVariantPrice?.currencyCode ||
       null
 
-    await this.prisma.$transaction(async (tx) => {
+    const offerProductIds = await this.prisma.$transaction(async (tx) => {
+      const offerItems = await tx.offerProductItem.findMany({
+        where: { shopId: shop, shopifyProductId: numericId },
+        select: { offerProductId: true },
+      })
+
       await tx.catalogProduct.upsert({
         where: {
           shopId_shopifyProductId: {
@@ -635,7 +656,18 @@ export class CatalogSyncService {
           })),
         })
       }
+
+      return [...new Set(offerItems.map((item) => item.offerProductId))]
     })
+
+    return offerProductIds
+  }
+
+  private async invalidateCampaigns(
+    shop: string,
+    offerProductIds: number[],
+  ): Promise<void> {
+    await this.recommendationCache.invalidateCampaigns(shop, offerProductIds)
   }
 
   private selectedOptionsToJson(

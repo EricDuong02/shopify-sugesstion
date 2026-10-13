@@ -1,0 +1,163 @@
+.recommendation-widget {
+  margin: 24px 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.recommendation-widget[hidden],
+.recommendation-widget[hidden] * {
+  display: none !important;
+}
+
+.recommendation-widget__loading,
+.recommendation-widget__message {
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 14px;
+  padding: 12px 0;
+}
+
+.recommendation-widget__heading,
+.recommendation-widget__campaign-heading {
+  line-height: 1.25;
+  margin: 0 0 16px;
+}
+
+.recommendation-widget__heading {
+  font-size: 1.5rem;
+}
+
+.recommendation-widget__campaign + .recommendation-widget__campaign {
+  margin-top: 28px;
+}
+
+.recommendation-widget__campaign-heading {
+  font-size: 1.15rem;
+}
+
+.recommendation-widget__carousel {
+  --recommendation-gap: 16px;
+  position: relative;
+}
+
+.recommendation-widget__track {
+  display: flex;
+  gap: var(--recommendation-gap);
+  list-style: none;
+  margin: 0;
+  overflow-x: auto;
+  padding: 0 0 8px;
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+}
+
+.recommendation-widget__swiper-ready .recommendation-widget__track {
+  gap: 0;
+  overflow: visible;
+  padding-bottom: 0;
+  scroll-behavior: auto;
+  scroll-snap-type: none;
+}
+
+.recommendation-widget__slide {
+  flex: 0 0 calc(
+    (100% - (var(--recommendation-columns) - 1) * var(--recommendation-gap)) /
+      var(--recommendation-columns)
+  );
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.recommendation-widget__card {
+  color: inherit;
+  display: block;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.recommendation-widget__card:focus-visible,
+.recommendation-widget__previous:focus-visible,
+.recommendation-widget__next:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+.recommendation-widget__image {
+  aspect-ratio: 1;
+  background: rgba(0, 0, 0, 0.04);
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.recommendation-widget__details {
+  padding-top: 8px;
+}
+
+.recommendation-widget__title {
+  font-size: 14px;
+  line-height: 1.35;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recommendation-widget__price {
+  font-size: 13px;
+  margin: 4px 0 0;
+  opacity: 0.7;
+}
+
+.recommendation-widget__previous,
+.recommendation-widget__next {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  font-size: 24px;
+  height: 36px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0 0 3px;
+  position: absolute;
+  top: calc(50% - 18px);
+  width: 36px;
+  z-index: 1;
+}
+
+.recommendation-widget__previous {
+  left: 8px;
+}
+
+.recommendation-widget__next {
+  right: 8px;
+}
+
+.recommendation-widget__previous[hidden],
+.recommendation-widget__next[hidden] {
+  display: none;
+}
+
+.recommendation-widget__previous:disabled,
+.recommendation-widget__next:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+@media screen and (max-width: 749px) {
+  .recommendation-widget__slide {
+    flex-basis: calc(
+      (100% - (var(--recommendation-mobile-columns) - 1) * var(--recommendation-gap)) /
+        var(--recommendation-mobile-columns)
+    );
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recommendation-widget__track {
+    scroll-behavior: auto;
+  }
+}

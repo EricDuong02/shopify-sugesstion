@@ -11,7 +11,8 @@ const storefrontPageTypes = [
 export class ThemeRecommendationDto {
   @IsString()
   @Matches(/^[1-9]\d*$/)
-  id: string
+  @IsOptional()
+  id?: string
 
   @IsString()
   @IsIn(storefrontPageTypes)
@@ -20,4 +21,29 @@ export class ThemeRecommendationDto {
   @IsString()
   @IsOptional()
   limit?: string
+
+  @IsString()
+  @Matches(/^[1-9]\d*$/)
+  @IsOptional()
+  productLimit?: string
+
+  @IsString()
+  @IsOptional()
+  shop?: string
+
+  @IsString()
+  @IsOptional()
+  timestamp?: string
+
+  @IsString()
+  @IsOptional()
+  signature?: string
+
+  @IsString()
+  @IsOptional()
+  path_prefix?: string
+
+  @IsString()
+  @IsOptional()
+  logged_in_customer_id?: string
 }

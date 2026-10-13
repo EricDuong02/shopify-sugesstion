@@ -9,6 +9,15 @@ describe('ThemeRecommendationDto', () => {
     forbidNonWhitelisted: true,
   })
 
+  it('accepts a supported page context without a campaign ID', async () => {
+    await expect(
+      pipe.transform(
+        { pageType: PageType.product, limit: '8' },
+        { type: 'query', metatype: ThemeRecommendationDto, data: '' },
+      ),
+    ).resolves.toEqual({ pageType: PageType.product, limit: '8' })
+  })
+
   it('accepts a supported page context and limit', async () => {
     await expect(
       pipe.transform(
@@ -36,10 +45,35 @@ describe('ThemeRecommendationDto', () => {
     ).rejects.toThrow()
   })
 
+  it('accepts Shopify App Proxy transport metadata', async () => {
+    await expect(
+      pipe.transform(
+        {
+          id: '12',
+          pageType: PageType.home,
+          shop: 'shop-a.myshopify.com',
+          timestamp: '1770000000',
+          signature: 'signature',
+          path_prefix: 'apps',
+          logged_in_customer_id: 'customer-1',
+        },
+        { type: 'query', metatype: ThemeRecommendationDto, data: '' },
+      ),
+    ).resolves.toEqual({
+      id: '12',
+      pageType: PageType.home,
+      shop: 'shop-a.myshopify.com',
+      timestamp: '1770000000',
+      signature: 'signature',
+      path_prefix: 'apps',
+      logged_in_customer_id: 'customer-1',
+    })
+  })
+
   it('rejects unknown query properties', async () => {
     await expect(
       pipe.transform(
-        { id: '12', pageType: PageType.home, shop: 'other-shop.myshopify.com' },
+        { id: '12', pageType: PageType.home, unexpected: 'value' },
         { type: 'query', metatype: ThemeRecommendationDto, data: '' },
       ),
     ).rejects.toThrow()

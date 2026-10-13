@@ -7,6 +7,7 @@ import {
 } from './services/catalog-sync.service'
 import { LlmRegistryService } from '../chat/llm/llm-registry.service'
 import { CatalogSyncProcessor } from './services/catalog-sync.processor'
+import { RecommendationCacheModule } from '../recommendation-cache/recommendation-cache.module'
 
 /**
  * Owns Shopify product catalog synchronization and the semantic product index.
@@ -17,6 +18,7 @@ import { CatalogSyncProcessor } from './services/catalog-sync.processor'
 @Module({
   imports: [
     ConfigModule,
+    RecommendationCacheModule,
     BullModule.forRoot({
       connection: { url: process.env.REDIS_URL || 'redis://localhost:6379' },
     }),

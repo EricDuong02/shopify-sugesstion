@@ -25,6 +25,33 @@
           "label": "Greeting message"
         }
       }
+    },
+    "recommendation": {
+      "name": "Recommendation campaigns",
+      "settings": {
+        "campaign_id": {
+          "label": "Campaign ID (optional)",
+          "info": "Leave blank to show active campaigns configured for this page in Recommendation admin. Enter an ID only to pin one campaign."
+        },
+        "heading": {
+          "label": "Heading"
+        },
+        "product_limit": {
+          "label": "Products to load",
+          "info": "The total number of products available to browse."
+        },
+        "columns": {
+          "label": "Desktop products visible",
+          "info": "Number of product cards visible horizontally on desktop."
+        },
+        "mobile_columns": {
+          "label": "Mobile products visible",
+          "info": "Number of product cards visible horizontally on mobile."
+        },
+        "loading_text": {
+          "label": "Loading text"
+        }
+      }
     }
   }
 }

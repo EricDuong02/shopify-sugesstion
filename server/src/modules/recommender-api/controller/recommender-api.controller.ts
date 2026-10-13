@@ -2,6 +2,7 @@ import { ShopifyServer, ShopifyShop } from '@/decorators/shop-server.decorator'
 import { Controller, Get, Header, Query, ValidationPipe } from '@nestjs/common'
 import { GraphqlClient } from '@shopify/shopify-api'
 import { RecommendDto, RecommendListDto } from '../dtos/recommends.dto'
+import { ThemeCampaignsDto } from '../dtos/theme-campaigns.dto'
 import { ThemeRecommendationDto } from '../dtos/theme-recommendation.dto'
 import { RecommenderApiService } from '../services/recommender-api.service'
 
@@ -66,7 +67,38 @@ export class RecommenderApiController {
     )
     query: ThemeRecommendationDto,
   ) {
-    return this.recommenderApiService.getThemeData(query, shop)
+    const { id, pageType, limit, productLimit } = query
+    if (!id) {
+      return this.recommenderApiService.getThemeCampaigns(
+        { pageType, limit, productLimit },
+        shop,
+      )
+    }
+
+    return this.recommenderApiService.getThemeData(
+      { id, pageType, limit },
+      shop,
+    )
+  }
+
+  @Get('theme/campaigns')
+  @Header('Cache-Control', 'private, no-store')
+  async fetchThemeCampaigns(
+    @ShopifyShop() shop: string,
+    @Query(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      }),
+    )
+    query: ThemeCampaignsDto,
+  ) {
+    const { pageType, limit, productLimit } = query
+    return this.recommenderApiService.getThemeCampaignList(
+      { pageType, limit, productLimit },
+      shop,
+    )
   }
 
   @Get('recommends/list')

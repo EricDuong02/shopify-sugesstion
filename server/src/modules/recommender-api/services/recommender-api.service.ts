@@ -5,12 +5,31 @@ import {
 } from '@nestjs/common'
 import { PrismaService } from '@/shared/services/prisma.service'
 import { RecommendDto } from '../dtos/recommends.dto'
+import { ThemeCampaignsDto } from '../dtos/theme-campaigns.dto'
 import { ThemeRecommendationDto } from '../dtos/theme-recommendation.dto'
 import { PageType } from '@/types/RecommendApi'
 import { pageOptions } from '@/data'
+import {
+  RecommendationCacheService,
+  RecommendationSnapshot,
+} from '../../recommendation-cache/services/recommendation-cache.service'
 
 const THEME_DEFAULT_PRODUCT_LIMIT = 8
 const THEME_MAX_PRODUCT_LIMIT = 50
+const THEME_DEFAULT_CAMPAIGN_LIMIT = 20
+const THEME_MAX_CAMPAIGN_LIMIT = 50
+const ACTIVE_PRODUCT_STATUS = 'ACTIVE'
+
+type ThemeCatalogProduct = {
+  shopifyProductId: string
+  onlineStoreUrl: string | null
+  featuredImageUrl: string | null
+  title: string
+  handle: string | null
+  status: string | null
+  publishedAt: Date | null
+  minPrice: number | null
+}
 
 function isPageType(value: string): value is PageType {
   return Object.values(PageType).some((pageType) => pageType === value)
@@ -41,6 +60,65 @@ function themeProductLimit(rawLimit: string | undefined): number {
 
   return Math.min(limit, THEME_MAX_PRODUCT_LIMIT)
 }
+
+function themeCampaignLimit(rawLimit: string | undefined): number {
+  if (!rawLimit) return THEME_DEFAULT_CAMPAIGN_LIMIT
+
+  const limit = Number(rawLimit)
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new BadRequestException(
+      'Recommendation campaign limit must be positive',
+    )
+  }
+
+  return Math.min(limit, THEME_MAX_CAMPAIGN_LIMIT)
+}
+
+function isSafeHttpUrl(value: string | null): value is string {
+  if (!value) return false
+
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function productUrl(product: ThemeCatalogProduct): string | null {
+  if (product.onlineStoreUrl !== null) {
+    return isSafeHttpUrl(product.onlineStoreUrl) ? product.onlineStoreUrl : null
+  }
+
+  if (!product.handle) return null
+
+  return `/products/${encodeURIComponent(product.handle)}`
+}
+
+function toThemeProduct(product: ThemeCatalogProduct) {
+  const url = productUrl(product)
+  if (
+    product.status !== ACTIVE_PRODUCT_STATUS ||
+    !product.publishedAt ||
+    product.publishedAt > new Date() ||
+    !url
+  ) {
+    return null
+  }
+
+  return {
+    id: product.shopifyProductId,
+    url,
+    avatarSource: isSafeHttpUrl(product.featuredImageUrl)
+      ? product.featuredImageUrl
+      : null,
+    name: product.title,
+    handle: product.handle,
+    status: product.status,
+    price: product.minPrice,
+  }
+}
+
 import { ListProductService } from './list-product.service'
 import { GraphqlClient } from '@shopify/shopify-api'
 
@@ -49,6 +127,7 @@ export class RecommenderApiService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly listProductService: ListProductService,
+    private readonly recommendationCache: RecommendationCacheService,
   ) {}
 
   private offerId(value: string): number {
@@ -217,24 +296,169 @@ export class RecommenderApiService {
   }
 
   async getThemeData(query: ThemeRecommendationDto, shop: string) {
+    if (!query.id) {
+      throw new BadRequestException('Recommendation campaign ID is required')
+    }
+
     const pageId = pageIdForType(query.pageType)
     const productLimit = themeProductLimit(query.limit)
-    const dataCondition = await this.prisma.offerProduct.findFirst({
+    const offerId = this.offerId(query.id)
+
+    return this.recommendationCache.getOrLoad(
+      shop,
+      offerId,
+      query.pageType,
+      productLimit,
+      async (): Promise<RecommendationSnapshot> => {
+        const now = new Date()
+        const dataCondition = await this.prisma.offerProduct.findFirst({
+          where: {
+            shopId: shop,
+            id: offerId,
+          },
+          select: {
+            id: true,
+            name: true,
+            triggerProduct: {
+              select: {
+                scheduleOn: true,
+                pageIds: true,
+              },
+            },
+            items: {
+              where: {
+                shopId: shop,
+                catalogProduct: {
+                  status: ACTIVE_PRODUCT_STATUS,
+                  publishedAt: { not: null, lte: now },
+                },
+              },
+              orderBy: { position: 'asc' },
+              take: productLimit,
+              select: {
+                catalogProduct: {
+                  select: {
+                    shopifyProductId: true,
+                    onlineStoreUrl: true,
+                    featuredImageUrl: true,
+                    title: true,
+                    handle: true,
+                    status: true,
+                    publishedAt: true,
+                    minPrice: true,
+                  },
+                },
+              },
+            },
+          },
+        })
+
+        if (!dataCondition) {
+          throw new NotFoundException(
+            `OfferProduct with id ${query.id} not found`,
+          )
+        }
+
+        const triggerProduct = dataCondition.triggerProduct
+        const isApplicable =
+          triggerProduct?.scheduleOn === true &&
+          triggerProduct.pageIds.includes(pageId)
+
+        return {
+          id: dataCondition.id,
+          name: dataCondition.name,
+          products: isApplicable
+            ? dataCondition.items
+                .map(({ catalogProduct }) => toThemeProduct(catalogProduct))
+                .filter((product): product is NonNullable<typeof product> =>
+                  Boolean(product),
+                )
+            : [],
+        }
+      },
+    )
+  }
+
+  async getThemeCampaignList(
+    query: ThemeCampaignsDto,
+    shop: string,
+  ): Promise<{
+    campaigns: Array<{ id: number; name: string }>
+  }> {
+    const pageId = pageIdForType(query.pageType)
+    const campaignLimit = themeCampaignLimit(query.limit)
+    const now = new Date()
+
+    const campaigns = await this.prisma.offerProduct.findMany({
       where: {
         shopId: shop,
-        id: this.offerId(query.id),
         triggerProduct: {
           is: {
             scheduleOn: true,
             pageIds: { has: pageId },
           },
         },
+        items: {
+          some: {
+            shopId: shop,
+            catalogProduct: {
+              status: ACTIVE_PRODUCT_STATUS,
+              publishedAt: { not: null, lte: now },
+            },
+          },
+        },
       },
+      orderBy: { id: 'asc' },
+      take: campaignLimit,
+      select: { id: true, name: true },
+    })
+
+    return { campaigns }
+  }
+
+  async getThemeCampaigns(
+    query: ThemeCampaignsDto,
+    shop: string,
+  ): Promise<{
+    campaigns: RecommendationSnapshot[]
+  }> {
+    const pageId = pageIdForType(query.pageType)
+    const campaignLimit = themeCampaignLimit(query.limit)
+    const productLimit = themeProductLimit(query.productLimit)
+    const now = new Date()
+
+    const campaigns = await this.prisma.offerProduct.findMany({
+      where: {
+        shopId: shop,
+        triggerProduct: {
+          is: {
+            scheduleOn: true,
+            pageIds: { has: pageId },
+          },
+        },
+        items: {
+          some: {
+            shopId: shop,
+            catalogProduct: {
+              status: ACTIVE_PRODUCT_STATUS,
+              publishedAt: { not: null, lte: now },
+            },
+          },
+        },
+      },
+      orderBy: { id: 'asc' },
+      take: campaignLimit,
       select: {
         id: true,
         name: true,
         items: {
-          where: { shopId: shop },
+          where: {
+            shopId: shop,
+            catalogProduct: {
+              status: ACTIVE_PRODUCT_STATUS,
+              publishedAt: { not: null, lte: now },
+            },
+          },
           orderBy: { position: 'asc' },
           take: productLimit,
           select: {
@@ -246,6 +470,7 @@ export class RecommenderApiService {
                 title: true,
                 handle: true,
                 status: true,
+                publishedAt: true,
                 minPrice: true,
               },
             },
@@ -254,24 +479,18 @@ export class RecommenderApiService {
       },
     })
 
-    if (!dataCondition) {
-      throw new NotFoundException(
-        `Active OfferProduct with id ${query.id} is not configured for ${query.pageType}`,
-      )
-    }
-
     return {
-      id: dataCondition.id,
-      name: dataCondition.name,
-      products: dataCondition.items.map(({ catalogProduct }) => ({
-        id: catalogProduct.shopifyProductId,
-        url: catalogProduct.onlineStoreUrl,
-        avatarSource: catalogProduct.featuredImageUrl,
-        name: catalogProduct.title,
-        handle: catalogProduct.handle,
-        status: catalogProduct.status,
-        price: catalogProduct.minPrice,
-      })),
+      campaigns: campaigns
+        .map((campaign) => ({
+          id: campaign.id,
+          name: campaign.name,
+          products: campaign.items
+            .map(({ catalogProduct }) => toThemeProduct(catalogProduct))
+            .filter((product): product is NonNullable<typeof product> =>
+              Boolean(product),
+            ),
+        }))
+        .filter((campaign) => campaign.products.length > 0),
     }
   }
 
