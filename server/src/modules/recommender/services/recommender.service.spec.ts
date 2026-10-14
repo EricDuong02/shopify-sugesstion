@@ -246,7 +246,6 @@ describe('RecommenderService canonical offer items', () => {
         rules: [],
       },
       trigger: {
-        pageIds: [],
         productGroups: triggerGroup,
       },
       fallback: { productGroups: { typeId: [], ids: [], rules: [] } },
@@ -255,6 +254,25 @@ describe('RecommenderService canonical offer items', () => {
 
     await service.createData(null, 'shop.example.com', data)
 
+    expect(tx.offerProduct.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          triggerProduct: expect.objectContaining({
+            create: expect.objectContaining({
+              pageIds: [],
+              productGroups: expect.objectContaining({
+                create: expect.objectContaining({ ids: triggerGroup.ids }),
+              }),
+            }),
+          }),
+          productGroups: expect.objectContaining({
+            create: expect.objectContaining({
+              ids: ['gid://shopify/Product/999'],
+            }),
+          }),
+        }),
+      }),
+    )
     expect(tx.offerProductItem.createMany).toHaveBeenCalledWith({
       data: [
         {
@@ -307,9 +325,11 @@ describe('RecommenderService canonical offer items', () => {
     const transaction = jest.fn(async (callback) => callback(tx))
     const prisma = createPrisma({
       offerProduct: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValue({ id: 7, fallBackProduct: null }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: 7,
+          fallBackProduct: null,
+          triggerProduct: { pageIds: [1, 4] },
+        }),
       },
       rules: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -333,6 +353,82 @@ describe('RecommenderService canonical offer items', () => {
       productGroups: { id: '10', typeId: [], ids: [], rules: [] },
       trigger: {
         id: '8',
+        productGroups: { id: '9', typeId: [], ids: [], rules: [] },
+      },
+      fallback: {
+        id: '',
+        productGroups: { id: '', typeId: [], ids: [], rules: [] },
+      },
+      scheduleOn: true,
+    }
+
+    await service.updateData(null, 'shop.example.com', data)
+
+    expect(tx.offerProduct.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          triggerProduct: expect.objectContaining({
+            update: expect.objectContaining({
+              data: expect.objectContaining({ pageIds: [1, 4] }),
+            }),
+          }),
+        }),
+      }),
+    )
+    expect(tx.offerProduct.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.not.objectContaining({
+          fallBackProduct: expect.anything(),
+        }),
+      }),
+    )
+    expect(tx.offerProductItem.deleteMany).toHaveBeenCalledWith({
+      where: { offerProductId: 7, shopId: 'shop.example.com' },
+    })
+    expect(tx.offerProductItem.createMany).not.toHaveBeenCalled()
+    expect(invalidateCampaign).toHaveBeenCalledWith('shop.example.com', 7)
+  })
+
+  it('clears legacy page IDs when an update explicitly sends an empty array', async () => {
+    const tx = {
+      offerProduct: {
+        update: jest.fn().mockResolvedValue({ id: 7 }),
+      },
+      offerProductItem: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+    }
+    const transaction = jest.fn(async (callback) => callback(tx))
+    const prisma = createPrisma({
+      offerProduct: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 7,
+          fallBackProduct: null,
+          triggerProduct: { pageIds: [1, 4] },
+        }),
+      },
+      rules: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      catalogProduct: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      $transaction: transaction,
+    })
+    const service = new RecommenderService(
+      prisma,
+      createListProductService(),
+      createCatalogSyncService(),
+      createRecommendationCache(),
+    )
+    const data: UpdateProductRecommenderDto = {
+      id: '7',
+      name: 'Related products',
+      placeId: 0,
+      productGroups: { id: '10', typeId: [], ids: [], rules: [] },
+      trigger: {
+        id: '8',
         pageIds: [],
         productGroups: { id: '9', typeId: [], ids: [], rules: [] },
       },
@@ -347,16 +443,48 @@ describe('RecommenderService canonical offer items', () => {
 
     expect(tx.offerProduct.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.not.objectContaining({
-          fallBackProduct: expect.anything(),
+        data: expect.objectContaining({
+          triggerProduct: expect.objectContaining({
+            update: expect.objectContaining({
+              data: expect.objectContaining({ pageIds: [] }),
+            }),
+          }),
         }),
       }),
     )
-    expect(tx.offerProductItem.deleteMany).toHaveBeenCalledWith({
-      where: { offerProductId: 7, shopId: 'shop.example.com' },
+  })
+
+  it('returns a clear error when an offer has no trigger product', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      id: 7,
+      fallBackProduct: null,
+      triggerProduct: null,
     })
-    expect(tx.offerProductItem.createMany).not.toHaveBeenCalled()
-    expect(invalidateCampaign).toHaveBeenCalledWith('shop.example.com', 7)
+    const service = new RecommenderService(
+      createPrisma({ offerProduct: { findFirst } }),
+      createListProductService(),
+      createCatalogSyncService(),
+      createRecommendationCache(),
+    )
+    const data: UpdateProductRecommenderDto = {
+      id: '7',
+      name: 'Related products',
+      placeId: 0,
+      productGroups: { id: '10', typeId: [], ids: [], rules: [] },
+      trigger: {
+        id: '8',
+        productGroups: { id: '9', typeId: [], ids: [], rules: [] },
+      },
+      fallback: {
+        id: '',
+        productGroups: { id: '', typeId: [], ids: [], rules: [] },
+      },
+      scheduleOn: true,
+    }
+
+    await expect(
+      service.updateData(null, 'shop.example.com', data),
+    ).rejects.toThrow('OfferProduct 7 has no trigger product')
   })
 
   it('rejects updates for an offer owned by another shop', async () => {
@@ -393,6 +521,9 @@ describe('RecommenderService canonical offer items', () => {
         id: true,
         fallBackProduct: {
           select: { id: true },
+        },
+        triggerProduct: {
+          select: { pageIds: true },
         },
       },
     })

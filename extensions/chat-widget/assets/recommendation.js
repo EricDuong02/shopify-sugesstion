@@ -9,9 +9,15 @@
   };
   var desktopColumnLimit = 6;
   var mobileColumnLimit = 3;
+  var rowLimit = 4;
   var defaultDesktopColumns = 4;
   var defaultMobileColumns = 1;
+  var defaultRows = 1;
   var defaultProductLimit = "8";
+  var defaultRecommendationsLabel = "Recommended products";
+  var defaultRowLabel = "Product row";
+  var defaultOriginalPriceLabel = "Original price";
+  var defaultSalePriceLabel = "Sale price";
   var desktopBreakpoint = 750;
   var slideGap = 16;
 
@@ -31,6 +37,8 @@
   }
 
   function productUrl(product) {
+    if (!product || typeof product !== "object") return "";
+
     var url = safeHttpUrl(product.url);
     if (url) return url;
 
@@ -45,10 +53,49 @@
     return safeHttpUrl(product.avatarSource);
   }
 
+  function formatPrice(value, currencyCode) {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "";
+
+    if (typeof currencyCode === "string" && currencyCode) {
+      try {
+        return new Intl.NumberFormat(undefined, {
+          style: "currency",
+          currency: currencyCode,
+        }).format(value);
+      } catch (error) {
+        return String(value);
+      }
+    }
+
+    return String(value);
+  }
+
   function validColumns(value, maximum, fallback) {
     var columns = Number(value);
     if (!Number.isInteger(columns) || columns < 1) return fallback;
     return Math.min(columns, maximum);
+  }
+
+  function validRows(value) {
+    return validColumns(value, rowLimit, defaultRows);
+  }
+
+  function splitProducts(products, rows) {
+    if (!products.length) return [];
+
+    var rowCount = Math.min(rows, products.length);
+    var baseSize = Math.floor(products.length / rowCount);
+    var remainder = products.length % rowCount;
+    var groups = [];
+    var start = 0;
+
+    for (var index = 0; index < rowCount; index += 1) {
+      var size = baseSize + (index < remainder ? 1 : 0);
+      groups.push(products.slice(start, start + size));
+      start += size;
+    }
+
+    return groups;
   }
 
   function createButton(className, label) {
@@ -76,7 +123,7 @@
       track.scrollLeft + track.clientWidth >= track.scrollWidth - 1;
   }
 
-  function renderProduct(track, product) {
+  function renderProduct(root, track, product) {
     var link = productUrl(product);
     if (!link) return;
 
@@ -102,11 +149,42 @@
     title.textContent = product.name || "Product";
     details.appendChild(title);
 
-    if (product.price !== null && product.price !== undefined) {
-      var price = document.createElement("p");
-      price.className = "recommendation-widget__price";
-      price.textContent = String(product.price);
-      details.appendChild(price);
+    var price = formatPrice(product.price, product.currencyCode);
+    var compareAtPrice = formatPrice(
+      product.compareAtPrice,
+      product.currencyCode
+    );
+    var hasSale =
+      typeof product.price === "number" &&
+      typeof product.compareAtPrice === "number" &&
+      Number.isFinite(product.price) &&
+      Number.isFinite(product.compareAtPrice) &&
+      product.compareAtPrice > product.price;
+
+    if (hasSale && compareAtPrice) {
+      var compareAtElement = document.createElement("del");
+      compareAtElement.className = "recommendation-widget__compare-at-price";
+      compareAtElement.textContent = compareAtPrice;
+      compareAtElement.setAttribute(
+        "aria-label",
+        root.getAttribute("data-original-price-label") || defaultOriginalPriceLabel
+      );
+      details.appendChild(compareAtElement);
+    }
+
+    if (price) {
+      var priceElement = document.createElement("p");
+      priceElement.className = hasSale
+        ? "recommendation-widget__price recommendation-widget__price--sale"
+        : "recommendation-widget__price";
+      priceElement.textContent = price;
+      if (hasSale) {
+        priceElement.setAttribute(
+          "aria-label",
+          root.getAttribute("data-sale-price-label") || defaultSalePriceLabel
+        );
+      }
+      details.appendChild(priceElement);
     }
 
     card.appendChild(details);
@@ -117,23 +195,16 @@
     track.appendChild(slide);
   }
 
-  function renderCampaign(root, campaign, columns, mobileColumns) {
-    if (!campaign || !Array.isArray(campaign.products)) return null;
-
-    var products = campaign.products;
-    var section = document.createElement("section");
-    section.className = "recommendation-widget__campaign";
-    section.setAttribute(
+  function renderRow(root, section, products, rowIndex, columns, mobileColumns) {
+    var row = document.createElement("div");
+    row.className = "recommendation-widget__row";
+    row.setAttribute("role", "group");
+    row.setAttribute(
       "aria-label",
-      campaign.name || root.getAttribute("data-heading") || "Recommendations"
+      (root.getAttribute("data-row-label") || defaultRowLabel) +
+        " " +
+        String(rowIndex + 1)
     );
-
-    if (campaign.name) {
-      var campaignHeading = document.createElement("h3");
-      campaignHeading.className = "recommendation-widget__campaign-heading";
-      campaignHeading.textContent = campaign.name;
-      section.appendChild(campaignHeading);
-    }
 
     var carousel = document.createElement("div");
     carousel.className = "recommendation-widget__carousel swiper";
@@ -145,10 +216,15 @@
 
     var track = document.createElement("ul");
     track.className = "recommendation-widget__track swiper-wrapper";
-    track.setAttribute("aria-label", campaign.name || "Recommended products");
+    track.setAttribute(
+      "aria-label",
+      (root.getAttribute("data-row-label") || defaultRowLabel) +
+        " " +
+        String(rowIndex + 1)
+    );
 
     products.forEach(function (product) {
-      renderProduct(track, product);
+      renderProduct(root, track, product);
     });
 
     if (!track.childElementCount) return null;
@@ -174,8 +250,8 @@
     carousel.appendChild(previousButton);
     carousel.appendChild(track);
     carousel.appendChild(nextButton);
-    section.appendChild(carousel);
-    root.appendChild(section);
+    row.appendChild(carousel);
+    section.appendChild(row);
 
     var swiper = null;
     if (window.Swiper) {
@@ -246,6 +322,47 @@
     };
   }
 
+  function renderCampaign(root, campaign, columns, mobileColumns, rows) {
+    if (!campaign || !Array.isArray(campaign.products)) return null;
+
+    var section = document.createElement("section");
+    section.className = "recommendation-widget__campaign";
+    section.setAttribute(
+      "aria-label",
+      campaign.name || root.getAttribute("data-heading") || defaultRecommendationsLabel
+    );
+
+    if (campaign.name) {
+      var campaignHeading = document.createElement("h3");
+      campaignHeading.className = "recommendation-widget__campaign-heading";
+      campaignHeading.textContent = campaign.name;
+      section.appendChild(campaignHeading);
+    }
+
+    var rowGroups = splitProducts(campaign.products, rows);
+    var cleanups = [];
+    rowGroups.forEach(function (products, rowIndex) {
+      var cleanup = renderRow(
+        root,
+        section,
+        products,
+        rowIndex,
+        columns,
+        mobileColumns
+      );
+      if (cleanup) cleanups.push(cleanup);
+    });
+
+    if (!cleanups.length) return null;
+    root.appendChild(section);
+
+    return function cleanup() {
+      cleanups.forEach(function (cleanupRow) {
+        cleanupRow();
+      });
+    };
+  }
+
   function render(root, data) {
     if (root.__recommendationCleanup) root.__recommendationCleanup();
     root.__recommendationCleanup = null;
@@ -274,10 +391,11 @@
       mobileColumnLimit,
       defaultMobileColumns
     );
+    var rows = validRows(root.getAttribute("data-rows"));
     var cleanups = [];
 
     campaigns.forEach(function (campaign) {
-      var cleanup = renderCampaign(root, campaign, columns, mobileColumns);
+      var cleanup = renderCampaign(root, campaign, columns, mobileColumns, rows);
       if (cleanup) cleanups.push(cleanup);
     });
 

@@ -10,7 +10,6 @@ const useDashboard = () => {
     data: {
       id: number
       name: string
-      trigger: string
       condition: string
       active: boolean
       products: RecommendedProduct[]

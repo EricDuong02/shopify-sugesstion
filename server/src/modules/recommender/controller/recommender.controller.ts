@@ -9,12 +9,12 @@ import {
   ValidationPipe,
 } from '@nestjs/common'
 import { RecommenderService } from '../services/recommender.service'
-import { listAttribute, listConditions, pageOptions } from '@/data'
-import { FetchProductsQueryDto } from 'src/modules/recommender/dtos/fetch-products-query.dto'
-import { CreateProductRecommenderDto } from 'src/modules/recommender/dtos/create-product-recommender.dto'
-import { UpdateProductRecommenderDto } from 'src/modules/recommender/dtos/update-product-recommender.dto'
-import { GetData } from 'src/modules/recommender/dtos/get-data.dto'
-import { GetDetail } from 'src/modules/recommender/dtos/get-detail.dto'
+import { listAttribute, listConditions } from '@/data'
+import { FetchProductsQueryDto } from '../dtos/fetch-products-query.dto'
+import { CreateProductRecommenderDto } from '../dtos/create-product-recommender.dto'
+import { UpdateProductRecommenderDto } from '../dtos/update-product-recommender.dto'
+import { GetData } from '../dtos/get-data.dto'
+import { GetDetail } from '../dtos/get-detail.dto'
 import { GraphqlClient } from '@shopify/shopify-api'
 import { RecommendDto } from '../dtos/recommends.dto'
 
@@ -167,13 +167,6 @@ export class RecommenderController {
       return {
         id: data.id,
         name: data.name,
-        trigger: data.triggerProduct.pageIds
-          .map(
-            (id) =>
-              pageOptions.find((option) => option.value === String(id))?.label,
-          )
-          .filter(Boolean)
-          .join(', '),
         condition: data.triggerProduct.productGroups
           .map((data) => {
             return data.rules

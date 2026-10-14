@@ -19,6 +19,8 @@ const snapshot: RecommendationSnapshot = {
       handle: 'product-a',
       status: 'ACTIVE',
       price: 12.5,
+      compareAtPrice: null,
+      currencyCode: null,
     },
   ],
 }

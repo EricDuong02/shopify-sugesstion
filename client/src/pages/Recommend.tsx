@@ -35,7 +35,7 @@ const Recommend = () => {
     useIndexResourceState(offerData)
 
   const rowMarkup = offerData.map(
-    ({ id, name, trigger, condition, products }, index) => {
+    ({ id, name, condition, products }, index) => {
       const listTitleProduct = products ? products.map((data) => data.name) : []
 
       return (
@@ -59,7 +59,6 @@ const Recommend = () => {
               </Text>
             </Link>
           </IndexTable.Cell>
-          <IndexTable.Cell>{trigger}</IndexTable.Cell>
           <IndexTable.Cell>
             <Text as="span">{condition}</Text>
           </IndexTable.Cell>
@@ -116,7 +115,6 @@ const Recommend = () => {
               alignment: 'start',
               id: 'recommendation-name',
             },
-            { title: 'Trigger', alignment: 'start', id: 'trigger' },
             {
               alignment: 'start',
               id: 'condition',

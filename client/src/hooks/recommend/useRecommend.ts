@@ -4,7 +4,7 @@ import {
   PRODUCT_RECOMMENDER_UPDATE,
   RECOMMEND,
 } from '@/const'
-import { listAttribute, listModule, pageOptions, PRODUCT_PAGE_ID } from '@/data'
+import { listAttribute, listModule } from '@/data'
 import { useApi } from '@/hooks/useApi'
 import { GetDataResult, RecommendedProduct, Rule } from '@/types/recommended'
 import { useToast } from '@shopify/app-bridge-react'
@@ -75,11 +75,6 @@ const useRecommend = () => {
       setDataForm(dataDetail)
     }
   }, [dataDetail])
-
-  const triggerPagesField = useField<string[]>({
-    value: dataForm[0]?.triggerProduct?.pageIds?.map(String) || [],
-    validates: [],
-  })
 
   const emptyRules = {
     id: '',
@@ -212,7 +207,6 @@ const useRecommend = () => {
         value: dataForm[0]?.triggerProduct?.id.toString() || '',
         validates: [],
       }),
-      pageIds: triggerPagesField,
       productGroups: useField({
         id: useField<string>({
           value:
@@ -293,18 +287,14 @@ const useRecommend = () => {
         if (slug === 'create') {
           const data = {
             name: fieldValues.name,
-            // Display options
             placeId: 0,
-            // Have value when click option product pages in trigger pages
             productGroups: {
               typeId: fieldValues.productGroups.typeId.value,
               rules: fieldValues.productRules.map(toCreateRule),
               ids: fieldValues.productGroups.ids.value,
             },
             trigger: {
-              //Trigger pages
-              pageIds: fieldValues.trigger.pageIds.value,
-              // recommended page
+              // recommended products
               productGroups: {
                 typeId: fieldValues.trigger.productGroups.value.typeId.value,
                 rules: [
@@ -339,9 +329,7 @@ const useRecommend = () => {
           const data = {
             id: fieldValues.id,
             name: fieldValues.name,
-            // Display options
             placeId: 0,
-            // Have value when click option product pages in trigger pages
             productGroups: {
               id: fieldValues.productGroups.id.value,
               typeId: fieldValues.productGroups.typeId.value,
@@ -349,10 +337,8 @@ const useRecommend = () => {
               ids: fieldValues.productGroups.ids.value,
             },
             trigger: {
-              //Trigger pages
               id: fieldValues.trigger.id.value,
-              pageIds: fieldValues.trigger.pageIds.value,
-              // recommended page
+              // recommended products
               productGroups: {
                 id: fieldValues.trigger.productGroups.value.id.value,
                 typeId: fieldValues.trigger.productGroups.value.typeId.value,
@@ -397,16 +383,6 @@ const useRecommend = () => {
       return { status: 'fail', errors: [{ message: 'bad form data' }] }
     },
   })
-
-  const handleChoiceListChange = (selected: string[]) => {
-    triggerPagesField.onChange(selected)
-
-    if (!selected.includes(PRODUCT_PAGE_ID)) {
-      hookForm.fields.productGroups.value.typeId.onChange([])
-      hookForm.fields.productGroups.value.ids.onChange([])
-      productRules.reset()
-    }
-  }
 
   const handleTriggerProduct = (selected: string[]) => {
     hookForm.fields.productGroups.value.typeId.onChange(selected)
@@ -460,7 +436,6 @@ const useRecommend = () => {
   return {
     slug,
     hookForm,
-    pageOptions,
     productRules,
     triggerRules,
     autoRecommend,
@@ -468,7 +443,6 @@ const useRecommend = () => {
     isLoadingProduct: isLoading,
     fallbackRules,
     fallbackAutoRecommend,
-    handleChoiceListChange,
     handleTriggerProduct,
     handleRecommendProduct,
     handleFallbackRecommendProduct,

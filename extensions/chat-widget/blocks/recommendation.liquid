@@ -1,6 +1,6 @@
 {% comment %}
-  Recommendation app block. Campaigns are discovered from active Trigger pages
-  for the current storefront page because theme app schemas cannot load dynamic app data.
+  Recommendation app block. The block location controls where campaigns render;
+  an optional campaign ID pins a campaign independently of the current template.
 {% endcomment %}
 
 {{ 'swiper-bundle.min.css' | asset_url | stylesheet_tag }}
@@ -14,8 +14,12 @@
   data-limit="{{ block.settings.product_limit }}"
   data-columns="{{ block.settings.columns }}"
   data-mobile-columns="{{ block.settings.mobile_columns }}"
+  data-rows="{{ block.settings.rows }}"
   data-previous-label="{{ 'recommendation_widget.previous' | t | escape }}"
   data-next-label="{{ 'recommendation_widget.next' | t | escape }}"
+  data-row-label="{{ 'recommendation_widget.row' | t | escape }}"
+  data-original-price-label="{{ 'recommendation_widget.original_price' | t | escape }}"
+  data-sale-price-label="{{ 'recommendation_widget.sale_price' | t | escape }}"
   data-loading-text="{{ block.settings.loading_text | strip | escape }}"
   {{ block.shopify_attributes }}
 >
@@ -36,7 +40,7 @@
       "type": "text",
       "id": "campaign_id",
       "label": "Campaign ID (optional)",
-      "info": "Leave blank to show active campaigns configured for this page in Recommendation admin. Enter an ID only to pin one campaign."
+      "info": "Leave blank to discover active campaigns for this shop. Enter a campaign ID to pin one campaign to this block."
     },
     {
       "type": "text",
@@ -71,6 +75,16 @@
       "info": "Number of product cards visible horizontally on mobile.",
       "min": 1,
       "max": 3,
+      "step": 1,
+      "default": 1
+    },
+    {
+      "type": "range",
+      "id": "rows",
+      "label": "Product rows",
+      "info": "Number of independent horizontal product rows.",
+      "min": 1,
+      "max": 4,
       "step": 1,
       "default": 1
     },

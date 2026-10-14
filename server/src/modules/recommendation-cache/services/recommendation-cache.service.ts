@@ -21,6 +21,8 @@ export type RecommendationProduct = {
   handle: string | null
   status: string | null
   price: number | null
+  compareAtPrice: number | null
+  currencyCode: string | null
 }
 
 export type RecommendationSnapshot = {
@@ -114,7 +116,11 @@ function isRecommendationProduct(
     isNullableString(value.handle) &&
     isNullableString(value.status) &&
     (value.price === null ||
-      (typeof value.price === 'number' && Number.isFinite(value.price)))
+      (typeof value.price === 'number' && Number.isFinite(value.price))) &&
+    (value.compareAtPrice === null ||
+      (typeof value.compareAtPrice === 'number' &&
+        Number.isFinite(value.compareAtPrice))) &&
+    isNullableString(value.currencyCode)
   )
 }
 

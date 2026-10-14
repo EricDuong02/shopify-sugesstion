@@ -39,6 +39,10 @@
   position: relative;
 }
 
+.recommendation-widget__row + .recommendation-widget__row {
+  margin-top: 20px;
+}
+
 .recommendation-widget__track {
   display: flex;
   gap: var(--recommendation-gap);
@@ -103,10 +107,23 @@
   white-space: nowrap;
 }
 
+.recommendation-widget__compare-at-price {
+  color: rgba(0, 0, 0, 0.55);
+  display: block;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
 .recommendation-widget__price {
   font-size: 13px;
   margin: 4px 0 0;
   opacity: 0.7;
+}
+
+.recommendation-widget__price--sale {
+  color: #b3261e;
+  font-weight: 600;
+  opacity: 1;
 }
 
 .recommendation-widget__previous,

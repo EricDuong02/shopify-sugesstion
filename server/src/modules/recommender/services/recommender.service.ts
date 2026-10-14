@@ -1,5 +1,5 @@
 import { DATA_PER_PAGE, MAX_QUERY_NUMBER } from '@/const/utils'
-import { PRODUCT_PAGE_ID, TRIGGER_PAGE_IDS } from '@/data'
+import { TRIGGER_PAGE_IDS } from '@/data'
 import { FetchBrandsResponse, FetchCategoryResponse } from '@/types/Recommend'
 import {
   BadRequestException,
@@ -148,13 +148,7 @@ export class RecommenderService {
     }))
   }
 
-  private normalizePageIds(
-    pageIds: Array<string | number> | null | undefined,
-  ): number[] {
-    if (!Array.isArray(pageIds)) {
-      throw new BadRequestException('Trigger page IDs must be an array')
-    }
-
+  private normalizeLegacyPageIds(pageIds: string[]): number[] {
     const allowedPageIds = new Set(TRIGGER_PAGE_IDS.map(Number))
     const normalized = pageIds.map((pageId) => {
       const value = Number(pageId)
@@ -165,15 +159,6 @@ export class RecommenderService {
     })
 
     return [...new Set(normalized)]
-  }
-
-  private normalizeTriggerGroup(
-    pageIds: number[],
-    group: ProductGroupInput,
-  ): ProductGroupInput {
-    return pageIds.includes(PRODUCT_PAGE_ID)
-      ? group
-      : { ...group, typeId: [], ids: [], rules: [] }
   }
 
   private async ensureCatalogProducts(
@@ -306,11 +291,10 @@ export class RecommenderService {
     shop: string,
     dataForm: CreateProductRecommenderDto,
   ) {
-    const pageIds = this.normalizePageIds(dataForm.trigger.pageIds)
-    const triggerProductGroup = this.normalizeTriggerGroup(
-      pageIds,
-      dataForm.productGroups,
-    )
+    const pageIds = dataForm.trigger.pageIds
+      ? this.normalizeLegacyPageIds(dataForm.trigger.pageIds)
+      : []
+    const triggerProductGroup = dataForm.productGroups
     const fallbackGroup =
       dataForm.fallback.productGroups.ids.length > 0 ||
       dataForm.fallback.productGroups.rules.length > 0
@@ -450,6 +434,9 @@ export class RecommenderService {
         fallBackProduct: {
           select: { id: true },
         },
+        triggerProduct: {
+          select: { pageIds: true },
+        },
       },
     })
     if (!offer) {
@@ -457,12 +444,16 @@ export class RecommenderService {
         `OfferProduct with id ${dataForm.id} not found`,
       )
     }
+    if (!offer.triggerProduct) {
+      throw new NotFoundException(
+        `OfferProduct ${offer.id} has no trigger product`,
+      )
+    }
 
-    const pageIds = this.normalizePageIds(dataForm.trigger.pageIds)
-    const triggerProductGroup = this.normalizeTriggerGroup(
-      pageIds,
-      dataForm.productGroups,
-    )
+    const pageIds = dataForm.trigger.pageIds
+      ? this.normalizeLegacyPageIds(dataForm.trigger.pageIds)
+      : offer.triggerProduct.pageIds
+    const triggerProductGroup = dataForm.productGroups
     const fallbackGroup =
       dataForm.fallback.productGroups.ids.length > 0 ||
       dataForm.fallback.productGroups.rules.length > 0

@@ -20,6 +20,12 @@ const THEME_DEFAULT_CAMPAIGN_LIMIT = 20
 const THEME_MAX_CAMPAIGN_LIMIT = 50
 const ACTIVE_PRODUCT_STATUS = 'ACTIVE'
 
+type ThemeCatalogVariant = {
+  price: number | null
+  compareAtPrice: number | null
+  availableForSale: boolean | null
+}
+
 type ThemeCatalogProduct = {
   shopifyProductId: string
   onlineStoreUrl: string | null
@@ -29,23 +35,12 @@ type ThemeCatalogProduct = {
   status: string | null
   publishedAt: Date | null
   minPrice: number | null
+  currencyCode: string | null
+  variants: ThemeCatalogVariant[]
 }
 
 function isPageType(value: string): value is PageType {
   return Object.values(PageType).some((pageType) => pageType === value)
-}
-
-function pageIdForType(pageType: PageType): number {
-  const pageOption = pageOptions.find(
-    (option) => option.pageOptions === pageType,
-  )
-  if (!pageOption) {
-    throw new BadRequestException(
-      `Page type ${pageType} is not supported by recommendation placements`,
-    )
-  }
-
-  return Number(pageOption.value)
 }
 
 function themeProductLimit(rawLimit: string | undefined): number {
@@ -95,6 +90,29 @@ function productUrl(product: ThemeCatalogProduct): string | null {
   return `/products/${encodeURIComponent(product.handle)}`
 }
 
+function compareAtPriceForProduct(
+  price: number | null,
+  variants: ThemeCatalogVariant[],
+): number | null {
+  if (price === null || !Number.isFinite(price)) return null
+
+  const eligibleCompareAtPrices = variants
+    .filter(
+      (variant) =>
+        variant.availableForSale !== false &&
+        variant.price === price &&
+        variant.compareAtPrice !== null &&
+        Number.isFinite(variant.compareAtPrice) &&
+        variant.compareAtPrice > price,
+    )
+    .map((variant) => variant.compareAtPrice)
+    .filter((value): value is number => value !== null)
+
+  return eligibleCompareAtPrices.length
+    ? Math.min(...eligibleCompareAtPrices)
+    : null
+}
+
 function toThemeProduct(product: ThemeCatalogProduct) {
   const url = productUrl(product)
   if (
@@ -116,6 +134,11 @@ function toThemeProduct(product: ThemeCatalogProduct) {
     handle: product.handle,
     status: product.status,
     price: product.minPrice,
+    compareAtPrice: compareAtPriceForProduct(
+      product.minPrice,
+      product.variants,
+    ),
+    currencyCode: product.currencyCode,
   }
 }
 
@@ -269,6 +292,15 @@ export class RecommenderApiService {
                 handle: true,
                 status: true,
                 minPrice: true,
+                currencyCode: true,
+                variants: {
+                  where: { shopId: shop },
+                  select: {
+                    price: true,
+                    compareAtPrice: true,
+                    availableForSale: true,
+                  },
+                },
               },
             },
           },
@@ -291,6 +323,11 @@ export class RecommenderApiService {
         handle: catalogProduct.handle,
         status: catalogProduct.status,
         price: catalogProduct.minPrice,
+        compareAtPrice: compareAtPriceForProduct(
+          catalogProduct.minPrice,
+          catalogProduct.variants,
+        ),
+        currencyCode: catalogProduct.currencyCode,
       })),
     }
   }
@@ -300,7 +337,6 @@ export class RecommenderApiService {
       throw new BadRequestException('Recommendation campaign ID is required')
     }
 
-    const pageId = pageIdForType(query.pageType)
     const productLimit = themeProductLimit(query.limit)
     const offerId = this.offerId(query.id)
 
@@ -322,7 +358,6 @@ export class RecommenderApiService {
             triggerProduct: {
               select: {
                 scheduleOn: true,
-                pageIds: true,
               },
             },
             items: {
@@ -346,6 +381,15 @@ export class RecommenderApiService {
                     status: true,
                     publishedAt: true,
                     minPrice: true,
+                    currencyCode: true,
+                    variants: {
+                      where: { shopId: shop },
+                      select: {
+                        price: true,
+                        compareAtPrice: true,
+                        availableForSale: true,
+                      },
+                    },
                   },
                 },
               },
@@ -360,9 +404,7 @@ export class RecommenderApiService {
         }
 
         const triggerProduct = dataCondition.triggerProduct
-        const isApplicable =
-          triggerProduct?.scheduleOn === true &&
-          triggerProduct.pageIds.includes(pageId)
+        const isApplicable = triggerProduct?.scheduleOn === true
 
         return {
           id: dataCondition.id,
@@ -385,7 +427,6 @@ export class RecommenderApiService {
   ): Promise<{
     campaigns: Array<{ id: number; name: string }>
   }> {
-    const pageId = pageIdForType(query.pageType)
     const campaignLimit = themeCampaignLimit(query.limit)
     const now = new Date()
 
@@ -395,7 +436,6 @@ export class RecommenderApiService {
         triggerProduct: {
           is: {
             scheduleOn: true,
-            pageIds: { has: pageId },
           },
         },
         items: {
@@ -422,7 +462,6 @@ export class RecommenderApiService {
   ): Promise<{
     campaigns: RecommendationSnapshot[]
   }> {
-    const pageId = pageIdForType(query.pageType)
     const campaignLimit = themeCampaignLimit(query.limit)
     const productLimit = themeProductLimit(query.productLimit)
     const now = new Date()
@@ -433,7 +472,6 @@ export class RecommenderApiService {
         triggerProduct: {
           is: {
             scheduleOn: true,
-            pageIds: { has: pageId },
           },
         },
         items: {
@@ -472,6 +510,15 @@ export class RecommenderApiService {
                 status: true,
                 publishedAt: true,
                 minPrice: true,
+                currencyCode: true,
+                variants: {
+                  where: { shopId: shop },
+                  select: {
+                    price: true,
+                    compareAtPrice: true,
+                    availableForSale: true,
+                  },
+                },
               },
             },
           },
@@ -505,13 +552,15 @@ export class RecommenderApiService {
       throw new BadRequestException(`Unsupported page type: ${pageType}`)
     }
 
-    const pageOption = pageOptions.find((data) => data.pageOptions === pageType)
-    if (!pageOption) {
+    const isSupportedPlacement = pageOptions.some(
+      (data) => data.pageOptions === pageType,
+    )
+    if (!isSupportedPlacement) {
       throw new BadRequestException(
         `Page type ${pageType} is not supported by recommendation placements`,
       )
     }
-    const valuePage = pageOption.value
+
     const data = await this.prisma.offerProduct.findMany({
       where: {
         shopId: shop,
@@ -521,9 +570,6 @@ export class RecommenderApiService {
         ...(listIds ? { id: { in: JSON.parse(listIds) } } : {}),
         triggerProduct: {
           is: {
-            pageIds: {
-              hasSome: [+valuePage],
-            },
             scheduleOn: true,
           },
         },

@@ -9,6 +9,9 @@
   "recommendation_widget": {
     "empty": "No recommendations available",
     "previous": "Previous products",
-    "next": "Next products"
+    "next": "Next products",
+    "row": "Product row",
+    "original_price": "Original price",
+    "sale_price": "Sale price"
   }
 }

@@ -31,7 +31,7 @@
       "settings": {
         "campaign_id": {
           "label": "Campaign ID (optional)",
-          "info": "Leave blank to show active campaigns configured for this page in Recommendation admin. Enter an ID only to pin one campaign."
+          "info": "Leave blank to discover active campaigns for this shop. Enter a campaign ID to pin one campaign to this block."
         },
         "heading": {
           "label": "Heading"
@@ -47,6 +47,10 @@
         "mobile_columns": {
           "label": "Mobile products visible",
           "info": "Number of product cards visible horizontally on mobile."
+        },
+        "rows": {
+          "label": "Product rows",
+          "info": "Number of independent horizontal product rows."
         },
         "loading_text": {
           "label": "Loading text"

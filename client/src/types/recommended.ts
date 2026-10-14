@@ -34,7 +34,6 @@ type ProductGroup = {
 
 type TriggerProduct = {
   id: number
-  pageIds: number[]
   productGroups: ProductGroup[]
   scheduleOn: boolean
   offerProductId: number
@@ -69,6 +68,8 @@ export type RecommendedProduct = {
   handle: string | null
   status: string | null
   price: number | null
+  compareAtPrice: number | null
+  currencyCode: string | null
 }
 
 export enum PageType {

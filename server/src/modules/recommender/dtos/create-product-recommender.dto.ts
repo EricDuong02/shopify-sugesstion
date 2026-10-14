@@ -1,10 +1,9 @@
 import { Type } from 'class-transformer'
-import { TRIGGER_PAGE_IDS } from '@/data'
 import {
   IsArray,
   IsBoolean,
-  IsIn,
   IsInt,
+  IsOptional,
   IsString,
   ValidateNested,
 } from 'class-validator'
@@ -37,10 +36,10 @@ class ProductGroupsDto {
 }
 
 class TriggerDto {
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  @IsIn(TRIGGER_PAGE_IDS, { each: true })
-  pageIds: string[]
+  pageIds?: string[]
 
   @ValidateNested()
   @Type(() => ProductGroupsDto)

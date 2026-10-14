@@ -101,6 +101,8 @@ describe('RecommenderApiService tenant isolation', () => {
             status: 'ACTIVE',
             publishedAt,
             minPrice: 12.5,
+            currencyCode: null,
+            variants: [],
           },
         },
       ],
@@ -126,6 +128,8 @@ describe('RecommenderApiService tenant isolation', () => {
           handle: 'product-a',
           status: 'ACTIVE',
           price: 12.5,
+          compareAtPrice: null,
+          currencyCode: null,
         },
       ],
     })
@@ -137,7 +141,7 @@ describe('RecommenderApiService tenant isolation', () => {
       },
       select: expect.objectContaining({
         triggerProduct: {
-          select: { scheduleOn: true, pageIds: true },
+          select: { scheduleOn: true },
         },
         items: expect.objectContaining({
           where: {
@@ -154,6 +158,118 @@ describe('RecommenderApiService tenant isolation', () => {
           take: 4,
         }),
       }),
+    })
+  })
+
+  it('maps the lowest eligible compare-at price for the matching selling price', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      id: 12,
+      name: 'Related products',
+      triggerProduct: {
+        scheduleOn: true,
+        pageIds: [HOME_PLACEMENT_ID],
+      },
+      items: [
+        {
+          catalogProduct: {
+            shopifyProductId: '101',
+            onlineStoreUrl: 'https://shop-a.myshopify.com/products/a',
+            featuredImageUrl: null,
+            title: 'Product A',
+            handle: 'product-a',
+            status: 'ACTIVE',
+            publishedAt,
+            minPrice: 12.5,
+            currencyCode: 'USD',
+            variants: [
+              {
+                price: 30,
+                compareAtPrice: 50,
+                availableForSale: true,
+              },
+              {
+                price: 12.5,
+                compareAtPrice: 20,
+                availableForSale: false,
+              },
+              {
+                price: 12.5,
+                compareAtPrice: 18,
+                availableForSale: true,
+              },
+              {
+                price: 12.5,
+                compareAtPrice: 22,
+                availableForSale: true,
+              },
+            ],
+          },
+        },
+      ],
+    })
+    const service = createService(createPrisma({ offerProduct: { findFirst } }))
+
+    await expect(
+      service.getThemeData(
+        { id: '12', pageType: PageType.home },
+        'shop-a.myshopify.com',
+      ),
+    ).resolves.toMatchObject({
+      products: [
+        {
+          price: 12.5,
+          compareAtPrice: 18,
+          currencyCode: 'USD',
+        },
+      ],
+    })
+  })
+
+  it('does not expose compare-at pricing when no matching sale variant exists', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      id: 12,
+      name: 'Related products',
+      triggerProduct: {
+        scheduleOn: true,
+        pageIds: [HOME_PLACEMENT_ID],
+      },
+      items: [
+        {
+          catalogProduct: {
+            shopifyProductId: '101',
+            onlineStoreUrl: 'https://shop-a.myshopify.com/products/a',
+            featuredImageUrl: null,
+            title: 'Product A',
+            handle: 'product-a',
+            status: 'ACTIVE',
+            publishedAt,
+            minPrice: 12.5,
+            currencyCode: 'USD',
+            variants: [
+              {
+                price: 12.5,
+                compareAtPrice: 12.5,
+                availableForSale: true,
+              },
+              {
+                price: 12.5,
+                compareAtPrice: 10,
+                availableForSale: true,
+              },
+            ],
+          },
+        },
+      ],
+    })
+    const service = createService(createPrisma({ offerProduct: { findFirst } }))
+
+    await expect(
+      service.getThemeData(
+        { id: '12', pageType: PageType.home },
+        'shop-a.myshopify.com',
+      ),
+    ).resolves.toMatchObject({
+      products: [{ price: 12.5, compareAtPrice: null, currencyCode: 'USD' }],
     })
   })
 
@@ -176,6 +292,8 @@ describe('RecommenderApiService tenant isolation', () => {
             status: 'ACTIVE',
             publishedAt,
             minPrice: 12.5,
+            currencyCode: null,
+            variants: [],
           },
         },
       ],
@@ -216,7 +334,7 @@ describe('RecommenderApiService tenant isolation', () => {
     })
   })
 
-  it('returns an empty snapshot for a campaign configured on another page', async () => {
+  it('returns a scheduled campaign regardless of legacy placement IDs', async () => {
     const findFirst = jest.fn().mockResolvedValue({
       id: 12,
       name: 'Related products',
@@ -224,7 +342,22 @@ describe('RecommenderApiService tenant isolation', () => {
         scheduleOn: true,
         pageIds: [PRODUCT_PLACEMENT_ID],
       },
-      items: [],
+      items: [
+        {
+          catalogProduct: {
+            shopifyProductId: '101',
+            onlineStoreUrl: 'https://shop-a.myshopify.com/products/a',
+            featuredImageUrl: null,
+            title: 'Product A',
+            handle: 'product-a',
+            status: 'ACTIVE',
+            publishedAt,
+            minPrice: 12.5,
+            currencyCode: null,
+            variants: [],
+          },
+        },
+      ],
     })
     const service = createService(createPrisma({ offerProduct: { findFirst } }))
 
@@ -233,10 +366,9 @@ describe('RecommenderApiService tenant isolation', () => {
         { id: '12', pageType: PageType.home },
         'shop-a.myshopify.com',
       ),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       id: 12,
-      name: 'Related products',
-      products: [],
+      products: [{ id: '101' }],
     })
   })
 
@@ -271,6 +403,8 @@ describe('RecommenderApiService tenant isolation', () => {
             status: 'ACTIVE',
             publishedAt,
             minPrice: 10,
+            currencyCode: null,
+            variants: [],
           },
         },
         {
@@ -283,6 +417,8 @@ describe('RecommenderApiService tenant isolation', () => {
             status: 'ARCHIVED',
             publishedAt,
             minPrice: 10,
+            currencyCode: null,
+            variants: [],
           },
         },
         {
@@ -295,6 +431,8 @@ describe('RecommenderApiService tenant isolation', () => {
             status: 'ACTIVE',
             publishedAt: null,
             minPrice: 10,
+            currencyCode: null,
+            variants: [],
           },
         },
         {
@@ -307,6 +445,8 @@ describe('RecommenderApiService tenant isolation', () => {
             status: 'ACTIVE',
             publishedAt,
             minPrice: 11,
+            currencyCode: null,
+            variants: [],
           },
         },
       ],
@@ -330,6 +470,8 @@ describe('RecommenderApiService tenant isolation', () => {
           handle: 'safe-product',
           status: 'ACTIVE',
           price: 11,
+          compareAtPrice: null,
+          currencyCode: null,
         },
       ],
     })
@@ -419,6 +561,8 @@ describe('RecommenderApiService tenant isolation', () => {
             handle: 'product-a',
             status: 'ACTIVE',
             minPrice: 12.5,
+            currencyCode: null,
+            variants: [],
           },
         },
       ],
@@ -439,6 +583,8 @@ describe('RecommenderApiService tenant isolation', () => {
           handle: 'product-a',
           status: 'ACTIVE',
           price: 12.5,
+          compareAtPrice: null,
+          currencyCode: null,
         },
       ],
     })
@@ -461,6 +607,15 @@ describe('RecommenderApiService tenant isolation', () => {
                 handle: true,
                 status: true,
                 minPrice: true,
+                currencyCode: true,
+                variants: {
+                  where: { shopId: 'shop-a.myshopify.com' },
+                  select: {
+                    price: true,
+                    compareAtPrice: true,
+                    availableForSale: true,
+                  },
+                },
               },
             },
           },
@@ -499,6 +654,8 @@ describe('RecommenderApiService tenant isolation', () => {
               status: 'ACTIVE',
               publishedAt,
               minPrice: 20,
+              currencyCode: null,
+              variants: [],
             },
           },
         ],
@@ -530,6 +687,8 @@ describe('RecommenderApiService tenant isolation', () => {
               handle: 'second',
               status: 'ACTIVE',
               price: 20,
+              compareAtPrice: null,
+              currencyCode: null,
             },
           ],
         },
@@ -540,7 +699,7 @@ describe('RecommenderApiService tenant isolation', () => {
       where: {
         shopId: 'shop-a.myshopify.com',
         triggerProduct: {
-          is: { scheduleOn: true, pageIds: { has: PRODUCT_PLACEMENT_ID } },
+          is: { scheduleOn: true },
         },
         items: {
           some: {
@@ -599,7 +758,7 @@ describe('RecommenderApiService tenant isolation', () => {
       where: {
         shopId: 'shop-a.myshopify.com',
         triggerProduct: {
-          is: { scheduleOn: true, pageIds: { has: PRODUCT_PLACEMENT_ID } },
+          is: { scheduleOn: true },
         },
         items: {
           some: {
@@ -620,46 +779,42 @@ describe('RecommenderApiService tenant isolation', () => {
     })
   })
 
-  it.each([
-    ['home', 1],
-    ['cart', 2],
-    ['collection', 3],
-    ['product', 4],
-  ])('lists only active offers on the %s page', async (pageType, pageId) => {
-    const findMany = jest
-      .fn()
-      .mockResolvedValue([{ id: 1, name: 'Page offer' }])
-    const service = createService(createPrisma({ offerProduct: { findMany } }))
+  it.each(['home', 'cart', 'collection', 'product'])(
+    'lists scheduled offers independently of legacy page IDs for %s',
+    async (pageType) => {
+      const findMany = jest
+        .fn()
+        .mockResolvedValue([{ id: 1, name: 'Page-independent offer' }])
+      const service = createService(
+        createPrisma({ offerProduct: { findMany } }),
+      )
 
-    await expect(
-      service.getManyData(
-        pageType,
-        20,
-        undefined,
-        undefined,
-        'shop-a.myshopify.com',
-      ),
-    ).resolves.toEqual([{ id: 1, name: 'Page offer' }])
+      await expect(
+        service.getManyData(
+          pageType,
+          20,
+          undefined,
+          undefined,
+          'shop-a.myshopify.com',
+        ),
+      ).resolves.toEqual([{ id: 1, name: 'Page-independent offer' }])
 
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        shopId: 'shop-a.myshopify.com',
-        name: { search: undefined },
-        triggerProduct: {
-          is: {
-            pageIds: { hasSome: [pageId] },
-            scheduleOn: true,
+      expect(findMany).toHaveBeenCalledWith({
+        where: {
+          shopId: 'shop-a.myshopify.com',
+          name: { search: undefined },
+          triggerProduct: {
+            is: { scheduleOn: true },
           },
         },
-      },
-      take: 20,
-    })
-  })
+        take: 20,
+      })
+    },
+  )
 
-  it('rejects placements that have no supported page mapping', async () => {
-    const service = createService(
-      createPrisma({ offerProduct: { findMany: jest.fn() } }),
-    )
+  it('rejects unsupported page types before listing campaigns', async () => {
+    const findMany = jest.fn()
+    const service = createService(createPrisma({ offerProduct: { findMany } }))
 
     await expect(
       service.getManyData(
@@ -669,6 +824,9 @@ describe('RecommenderApiService tenant isolation', () => {
         undefined,
         'shop-a.myshopify.com',
       ),
-    ).rejects.toThrow('not supported by recommendation placements')
+    ).rejects.toThrow(
+      'Page type blog_post is not supported by recommendation placements',
+    )
+    expect(findMany).not.toHaveBeenCalled()
   })
 })

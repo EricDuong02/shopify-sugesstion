@@ -1,16 +1,30 @@
 import { ValidationPipe } from '@nestjs/common'
 import { CreateProductRecommenderDto } from './create-product-recommender.dto'
+import { UpdateProductRecommenderDto } from './update-product-recommender.dto'
 
 const validPayload = {
   name: 'Related products',
   placeId: 0,
   productGroups: { typeId: [], ids: [], rules: [] },
   trigger: {
-    pageIds: ['1', '4'],
     productGroups: { typeId: [], ids: [], rules: [] },
   },
   fallback: { productGroups: { typeId: [], ids: [], rules: [] } },
   scheduleOn: true,
+}
+
+const validUpdatePayload = {
+  id: '7',
+  ...validPayload,
+  productGroups: { id: '10', typeId: [], ids: [], rules: [] },
+  trigger: {
+    id: '8',
+    productGroups: { id: '9', typeId: [], ids: [], rules: [] },
+  },
+  fallback: {
+    id: '11',
+    productGroups: { id: '12', typeId: [], ids: [], rules: [] },
+  },
 }
 
 describe('recommendation DTO boundary', () => {
@@ -20,7 +34,7 @@ describe('recommendation DTO boundary', () => {
     forbidNonWhitelisted: true,
   })
 
-  it('transforms the numeric place ID and preserves the wire page IDs', async () => {
+  it('transforms the numeric place ID without requiring placement data', async () => {
     const result = await pipe.transform(validPayload, {
       type: 'body',
       metatype: CreateProductRecommenderDto,
@@ -28,22 +42,22 @@ describe('recommendation DTO boundary', () => {
     })
 
     expect(result.placeId).toBe(0)
-    expect(result.trigger.pageIds).toEqual(['1', '4'])
+    expect(result.trigger.pageIds).toBeUndefined()
   })
 
-  it('rejects unsupported page IDs', async () => {
-    await expect(
-      pipe.transform(
-        {
-          ...validPayload,
-          trigger: {
-            ...validPayload.trigger,
-            pageIds: ['9'],
-          },
+  it('accepts legacy placement data for backward compatibility', async () => {
+    const result = await pipe.transform(
+      {
+        ...validPayload,
+        trigger: {
+          ...validPayload.trigger,
+          pageIds: ['1', '4'],
         },
-        { type: 'body', metatype: CreateProductRecommenderDto, data: '' },
-      ),
-    ).rejects.toThrow()
+      },
+      { type: 'body', metatype: CreateProductRecommenderDto, data: '' },
+    )
+
+    expect(result.trigger.pageIds).toEqual(['1', '4'])
   })
 
   it('rejects a string place ID instead of coercing it', async () => {
@@ -60,6 +74,43 @@ describe('recommendation DTO boundary', () => {
       pipe.transform(
         { ...validPayload, unexpected: true },
         { type: 'body', metatype: CreateProductRecommenderDto, data: '' },
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('accepts an update without legacy placement data', async () => {
+    const result = await pipe.transform(validUpdatePayload, {
+      type: 'body',
+      metatype: UpdateProductRecommenderDto,
+      data: '',
+    })
+
+    expect(result.trigger.pageIds).toBeUndefined()
+  })
+
+  it('accepts legacy placement data on update', async () => {
+    const result = await pipe.transform(
+      {
+        ...validUpdatePayload,
+        trigger: {
+          ...validUpdatePayload.trigger,
+          pageIds: ['1', '4'],
+        },
+      },
+      { type: 'body', metatype: UpdateProductRecommenderDto, data: '' },
+    )
+
+    expect(result.trigger.pageIds).toEqual(['1', '4'])
+  })
+
+  it('rejects unknown nested update properties', async () => {
+    await expect(
+      pipe.transform(
+        {
+          ...validUpdatePayload,
+          trigger: { ...validUpdatePayload.trigger, unexpected: true },
+        },
+        { type: 'body', metatype: UpdateProductRecommenderDto, data: '' },
       ),
     ).rejects.toThrow()
   })

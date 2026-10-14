@@ -161,15 +161,6 @@ export const listConditions = [
   { value: '4', label: 'is not one of' },
 ]
 
-export const pageOptions = [
-  { value: '1', label: 'Home page' },
-  { value: '2', label: 'Cart page' },
-  { value: '3', label: 'Collection pages' },
-  { value: '4', label: 'Product pages' },
-]
-
-export const PRODUCT_PAGE_ID = '4'
-
 export const typeProduct = [
   { value: '1', label: 'Any products' },
   // { value: '2', label: 'Specific products' },
